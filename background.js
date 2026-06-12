@@ -77,6 +77,7 @@ You must respond ONLY with a JSON object matching this schema:
 
 Rules:
 1. Only choose element IDs that are present in the provided INTERACTIVE_ELEMENTS list.
+1b. The "input" action REPLACES the element's ENTIRE current content with the new value (this also works for code editors like Monaco/CodeMirror). Never try to clear a field or editor first, and never re-send the same input because you suspect duplication.
 2. If you need to search for something or go to a website, find the input box, type into it, and then pressEnter or click the submit/search button. Or, you can navigate directly using the "navigate" action and a URL.
 3. If you have achieved the user's goal (e.g., found the information, finished the task), set action to "done" and summarize your findings in "finalAnswer".
 4. If you hit an obstacle you cannot overcome (e.g. repeated failures, missing pages, captchas), set action to "fail" and explain the problem in "finalAnswer".
@@ -417,8 +418,11 @@ async function startAgentLoop() {
 
       // Request User Confirmation for Action
       if (requireConfirmation) {
-        pendingConfirmation = agentDecision;
-        chrome.runtime.sendMessage({ type: 'CONFIRMATION_REQUIRED', decision: agentDecision }).catch(() => {});
+        pendingConfirmation = {
+          ...agentDecision,
+          elementDesc: findElementDescription(agentDecision.targetId, domContext)
+        };
+        chrome.runtime.sendMessage({ type: 'CONFIRMATION_REQUIRED', decision: pendingConfirmation }).catch(() => {});
         
         updateState('waiting');
         addLog(`[System] Waiting for safety confirmation in Sidepanel...`, 'system-log');
@@ -538,6 +542,14 @@ function validateAndSanitizeAction(decision, domContext) {
     }
   }
   return { valid: true };
+}
+
+// Returns the simplified-DOM line describing an element, so confirmation
+// prompts can show what the target actually is (button text etc.).
+function findElementDescription(targetId, domContext) {
+  if (!targetId || !domContext) return null;
+  const match = domContext.match(new RegExp(`^- .*ID="${targetId}"[^\\n]*`, 'm'));
+  return match ? match[0].replace(/^- /, '') : null;
 }
 
 // Determines if an action is critical and requires safety manual override check.

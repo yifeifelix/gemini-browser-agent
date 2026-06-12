@@ -525,7 +525,8 @@ function renderConfirmationCard(decision) {
   if (decision.action === 'click') {
     actionText = `Click element ID="${decision.targetId}"`;
   } else if (decision.action === 'input') {
-    actionText = `Type "${decision.value}" into element ID="${decision.targetId}"`;
+    const preview = (decision.value || '').length > 60 ? decision.value.slice(0, 60) + '…' : decision.value;
+    actionText = `Type "${preview}" into element ID="${decision.targetId}"`;
   } else if (decision.action === 'pressEnter') {
     actionText = `Press Enter on element ID="${decision.targetId}"`;
   } else if (decision.action === 'select') {
@@ -533,8 +534,15 @@ function renderConfirmationCard(decision) {
   } else if (decision.action === 'navigate') {
     actionText = `Navigate to URL: "${decision.value}"`;
   }
-  
-  msg.textContent = `🚨 Safety Confirmation:\nAI wants to: ${actionText}`;
+
+  let confirmText = `🚨 Safety Confirmation:\nAI wants to: ${actionText}`;
+  if (decision.elementDesc) {
+    confirmText += `\nTarget: ${decision.elementDesc}`;
+  }
+  if (decision.thought) {
+    confirmText += `\nWhy: ${decision.thought}`;
+  }
+  msg.textContent = confirmText;
   card.appendChild(msg);
   
   const actionsDiv = document.createElement('div');

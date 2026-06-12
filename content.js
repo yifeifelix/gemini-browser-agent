@@ -126,11 +126,8 @@ function executeAction(action, targetId, value) {
       return { success: true, message: `Clicked element ID="${targetId}"` };
       
     } else if (action === 'input') {
-      el.value = value;
-      // Dispatch standard input/change events for JS frameworks
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return { success: true, message: `Typed "${value}" into element ID="${targetId}"` };
+      setElementValue(el, value);
+      return { success: true, message: `Typed ${value.length} chars into element ID="${targetId}" (replacing previous content)` };
       
     } else if (action === 'pressEnter') {
       // Dispatch enter keyboard events
@@ -162,6 +159,37 @@ function executeAction(action, targetId, value) {
   } catch (err) {
     return { success: false, error: `Error executing action on element ID="${targetId}": ${err.message}` };
   }
+}
+
+// Sets text on regular inputs, contenteditable hosts, and complex code
+// editors (Monaco/CodeMirror) whose hidden textarea ignores direct
+// .value writes. Editing-command path first (fires a real input event
+// stream that editors treat as typing), direct assignment as fallback.
+function setElementValue(el, value) {
+  el.focus();
+
+  // Select existing content so the insert REPLACES instead of appending
+  if (el.isContentEditable) {
+    document.execCommand('selectAll', false, null);
+  } else if (typeof el.setSelectionRange === 'function' && typeof el.value === 'string') {
+    try { el.setSelectionRange(0, el.value.length); } catch (e) { /* unsupported input types */ }
+  }
+  // Code editors bind Select-All on their hidden textarea's keydown
+  const ctrlA = { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true };
+  el.dispatchEvent(new KeyboardEvent('keydown', ctrlA));
+  el.dispatchEvent(new KeyboardEvent('keyup', ctrlA));
+
+  const inserted = document.execCommand('insertText', false, value);
+
+  if (!inserted) {
+    if (el.isContentEditable) {
+      el.textContent = value;
+    } else {
+      el.value = value;
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 // ===== Set-of-Marks visual markers =====
