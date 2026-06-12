@@ -179,6 +179,23 @@ function setElementValue(el, value) {
   el.dispatchEvent(new KeyboardEvent('keydown', ctrlA));
   el.dispatchEvent(new KeyboardEvent('keyup', ctrlA));
 
+  // Synthetic paste first: editors (Monaco/CodeMirror) insert pasted text
+  // VERBATIM, while the insertText "typing" path triggers per-line
+  // auto-indent that mangles already-indented code. Plain inputs ignore
+  // untrusted paste events, detectable via defaultPrevented.
+  try {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', value);
+    const pasteEvt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+    el.dispatchEvent(pasteEvt);
+    if (pasteEvt.defaultPrevented) {
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+  } catch (e) {
+    // ClipboardEvent/DataTransfer unsupported — fall through to insertText
+  }
+
   const inserted = document.execCommand('insertText', false, value);
 
   if (!inserted) {

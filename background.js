@@ -79,7 +79,8 @@ Rules:
 1. Only choose element IDs that are present in the provided INTERACTIVE_ELEMENTS list.
 1b. The "input" action REPLACES the element's ENTIRE current content with the new value (this also works for code editors like Monaco/CodeMirror). Never try to clear a field or editor first, and never re-send the same input because you suspect duplication.
 2. If you need to search for something or go to a website, find the input box, type into it, and then pressEnter or click the submit/search button. Or, you can navigate directly using the "navigate" action and a URL.
-3. If you have achieved the user's goal (e.g., found the information, finished the task), set action to "done" and summarize your findings in "finalAnswer".
+3. If you have achieved the user's goal (e.g., found the information, finished the task), set action to "done" and write your findings in "finalAnswer".
+3b. finalAnswer quality: when the goal asks a question, requests an explanation, or asks you to read/summarize page content, write a DETAILED, well-structured answer in Markdown (use headings, bullet lists, and code blocks where helpful) in the same language the user used. Cover the substance fully — do not compress it into one or two sentences. Brief answers are only acceptable for simple action confirmations (e.g. "Opened YouTube").
 4. If you hit an obstacle you cannot overcome (e.g. repeated failures, missing pages, captchas), set action to "fail" and explain the problem in "finalAnswer".
 5. If the DOM context indicates it is not accessible, you cannot perform browser actions like click, input, select, or pressEnter. However, if the user's goal is to visit a website (e.g. "open YouTube"), you should set action to "navigate" and value to the URL. Otherwise, set action to "done" and output your response in "finalAnswer".`;
 
@@ -323,7 +324,7 @@ async function startAgentLoop() {
           contents: buildApiContents(executionHistory),
           generationConfig: {
             responseMimeType: "application/json",
-            maxOutputTokens: 1024,
+            maxOutputTokens: 8192,
             responseSchema: {
               type: "OBJECT",
               properties: {
