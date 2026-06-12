@@ -558,3 +558,42 @@ body {
 .chat-area::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
+
+/* ===== Settings Panel ===== */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background-color: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  font-size: 0.78rem;
+  color: #e2e8f0;
+}
+.settings-panel.hidden { display: none; }
+.settings-label { display: flex; flex-direction: column; gap: 3px; color: #94a3b8; }
+.settings-label input {
+  padding: 5px 8px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  background-color: #1e293b;
+  color: #e2e8f0;
+  outline: none;
+}
+.settings-label input:focus { border-color: #1a73e8; }
+.settings-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; color: #94a3b8; }
+.settings-actions { display: flex; align-items: center; gap: 8px; }
+.test-connection-btn {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #1a73e8;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+.test-connection-btn:hover { background: #1765c8; }
+.connection-status { font-size: 0.72rem; }
+.connection-status.ok { color: #34d399; }
+.connection-status.fail { color: #f87171; }
