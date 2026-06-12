@@ -534,13 +534,12 @@ function validateAndSanitizeAction(decision, domContext) {
   return { valid: true };
 }
 
-// Determines if an action is critical and requires safety manual override check
+// Determines if an action is critical and requires safety manual override check.
+// Only consulted in "Act without asking" mode — "Ask before acting" already
+// confirms every step. Navigation is NOT treated as critical here: URLs are
+// independently validated (HTTPS enforced, local/private hosts blocked) in
+// validateAndSanitizeAction.
 function checkIsCriticalAction(decision, domContext) {
-  // Direct navigation actions always require user confirmation
-  if (decision.action === 'navigate') {
-    return true;
-  }
-  
   if (!decision.targetId) return false;
   
   // Find target element details in simplified DOM output
