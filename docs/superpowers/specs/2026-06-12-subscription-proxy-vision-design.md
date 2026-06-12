@@ -28,7 +28,7 @@ sidepanel ──→ background.js ──→ http://127.0.0.1:8317/v1beta/...（C
 - `host_permissions` 改为 `http://127.0.0.1/*` 与 `http://localhost/*`，移除 `https://generativelanguage.googleapis.com/*`。
 - sidepanel 新增设置区：
   - 代理地址，默认 `http://127.0.0.1:8317`
-  - API Key（对应 CLIProxyAPI 配置 `api-keys` 中的值），以 `x-goog-api-key` / `Authorization: Bearer` 之一发送（实施时按 CLIProxyAPI Gemini 路由实际要求确定，二者取其文档明确支持者）
+  - API Key（对应 CLIProxyAPI 配置 `api-keys` 中的值），以 `X-Goog-Api-Key` 请求头发送（已在 CLIProxyAPI 源码 `internal/access/config_access/provider.go` 中确认支持）
   - 均存入 `chrome.storage.local`
 - 原「Authorize Google Account」按钮改为「连接测试」：调用一次模型列表接口验证连通性与 Key 有效性，结果显示在按钮状态上。
 - README 重写为面向家庭成员的安装指南：安装 CLIProxyAPI（Windows 可选 ProxyPilot / EasyCLI 图形界面）→ 用自己的 Google 订阅账号完成一次登录 → 在代理配置中设置 API Key → 填入扩展设置。
