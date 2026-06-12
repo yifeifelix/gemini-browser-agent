@@ -1,0 +1,7 @@
+# Test artifacts and temp browser profiles
+.tmp-*
+*.log
+
+# Tooling state
+.omx/
+.claude/settings.local.json

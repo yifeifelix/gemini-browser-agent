@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Browser Agent",
+  "version": "1.0.0",
+  "description": "An agentic browser assistant powered by Google Gemini via OAuth 2.0.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel",
+    "identity",
+    "tabs",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open Gemini Browser Agent"
+  },
+  "oauth2": {
+    "client_id": "136724520710-i6be32g8ht2uun6hddshcrm7bin66qo0.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/generative-language.retriever"
+    ]
+  }
+}

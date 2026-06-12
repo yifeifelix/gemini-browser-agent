@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Browser Agent</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Top Header Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="custom-select-wrapper">
+          <select id="model-select" class="model-select">
+            <option value="gemini-3.5-flash" selected>Gemini 3.5 Flash</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+          </select>
+        </div>
+      </div>
+      <div class="header-right">
+        <!-- New Chat Button -->
+        <button id="new-chat-btn" class="header-icon-btn" title="New Chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            <line x1="12" y1="7" x2="12" y2="13"></line>
+            <line x1="9" y1="10" x2="15" y2="10"></line>
+          </svg>
+        </button>
+        <!-- Authorize Button -->
+        <button id="auth-btn" class="header-icon-btn auth-inactive" title="Authorize Google Account">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Chat & Execution Thread -->
+    <main class="chat-area">
+      <div id="chat-container" class="chat-container">
+        <!-- Initial system greeting -->
+        <div class="chat-message assistant">
+          <div class="message-content">
+            <p>Hello! I am your Antigravity Gemini Browser Agent. Ask me a question about this page, or enter a goal for me to automate.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Input Area Panel -->
+    <footer class="input-panel">
+      <!-- Attached Selection Pill -->
+      <div id="selection-badge" class="selection-badge hidden">
+        <span class="selection-icon">📄</span>
+        <span id="selection-text-preview" class="selection-text">Page selection attached</span>
+        <button id="clear-selection-btn" class="clear-selection-btn" title="Clear selection">×</button>
+      </div>
+
+      <!-- Action Box Form -->
+      <div class="chat-form-container">
+        <div class="chat-form-row text-input-row">
+          <textarea id="goal-input" placeholder="Ask a question or enter a goal..." rows="1"></textarea>
+        </div>
+        
+        <div class="chat-form-row action-controls-row">
+          <!-- Action Mode Dropdown Selector -->
+          <div class="action-mode-container">
+            <button id="action-mode-trigger" class="action-mode-trigger-btn">
+              <span id="action-mode-icon">✋</span>
+              <span id="action-mode-text">Ask before acting</span>
+              <svg class="dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div id="action-mode-menu" class="action-mode-menu hidden">
+              <div class="action-mode-option" data-mode="ask">
+                <span class="option-icon">✋</span>
+                <div class="option-details">
+                  <div class="option-title">Ask before acting</div>
+                  <div class="option-desc">Review and approve every click or typing step.</div>
+                </div>
+              </div>
+              <div class="action-mode-option" data-mode="auto">
+                <span class="option-icon">🚀</span>
+                <div class="option-details">
+                  <div class="option-title">Act without asking</div>
+                  <div class="option-desc">Run automatically without pausing for approval.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Side controls matching Claude GUI -->
+          <div class="side-controls">
+            <!-- Screenshot/Select element placeholder icon -->
+            <button id="inspector-btn" class="control-icon-btn" title="Select element from page (Requires manual activeTab activation)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h6v6M9 21H3v-6M21 9v6M3 9v6"></path>
+                <circle cx="12" cy="12" r="2"></circle>
+              </svg>
+            </button>
+            <!-- Add context / Plus icon -->
+            <button id="add-context-btn" class="control-icon-btn" title="Add page context manually">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+            <!-- Send / Stop Button -->
+            <button id="send-btn" class="send-btn" title="Send message / Execute Goal">
+              <svg id="send-icon" class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5"></line>
+                <polyline points="5 12 12 5 19 12"></polyline>
+              </svg>
+              <svg id="stop-icon" class="stop-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- AI Disclaimer text below -->
+      <div class="disclaimer-text">
+        Gemini is AI and can make mistakes. Please double-check responses.
+      </div>
+    </footer>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
