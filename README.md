@@ -16,11 +16,22 @@
 
 ### 第 1 步：安装并配置 CLIProxyAPI（每台电脑一次）
 
-1. 从 [CLIProxyAPI Releases](https://github.com/router-for-me/CLIProxyAPI/releases) 下载对应系统版本并解压。
+1. 从 [CLIProxyAPI Releases](https://github.com/router-for-me/CLIProxyAPI/releases/latest) 下载对应系统版本并解压。
+   - Windows 下载文件名形如 `CLIProxyAPI_x.y.z_windows_amd64.zip`（在 Assets 列表里，不是 Source code 包）。
    - Windows 用户也可选择带图形界面的 [ProxyPilot](https://github.com/Finesssee/ProxyPilot) 或 [EasyCLI](https://github.com/router-for-me/EasyCLI)。
 2. 编辑 `config.yaml`：在 `api-keys:` 下添加一个自定义密钥（例如 `my-family-key-2026`），其余保持默认（端口 8317）。
 3. 启动代理，按提示用 **Gemini 登录**（`--login` 参数或 GUI 内登录），用你自己的 Google 订阅账号完成 OAuth。
 4. 保持代理在后台运行（可配置开机自启）。
+
+### 备选：不装代理，直接用 AI Studio API Key
+
+如果暂时不想安装本地代理，可以直接连 Google 官方 API（注意：走的是 API 免费层/付费层额度，**不是订阅额度**，免费层重度使用会限流）：
+
+1. 到 [Google AI Studio](https://aistudio.google.com/apikey) 创建一个 API Key。
+2. 扩展设置中：Proxy URL 填 `https://generativelanguage.googleapis.com`，API Key 填刚创建的 Key。
+3. 点 Test Connection，模型列表会直接从官方接口加载。
+
+两种模式可随时在设置里切换，接口格式完全相同。
 
 ### 第 2 步：安装扩展
 

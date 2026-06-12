@@ -39,6 +39,7 @@ test('parseModelList tolerates malformed payloads', () => {
 
 test('describeApiError gives actionable messages', () => {
   assert.match(describeApiError('network', 'http://127.0.0.1:8317'), /CLIProxyAPI is running/);
+  assert.match(describeApiError(400, 'x'), /API Key/); // Google returns 400 for invalid API keys
   assert.match(describeApiError(401, 'x'), /API Key/);
   assert.match(describeApiError(403, 'x'), /API Key/);
   assert.equal(describeApiError(500, 'x'), null);
