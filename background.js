@@ -9,7 +9,7 @@ let agentLoopActive = false;
 let executionHistory = []; // Conversation history for Gemini API
 let pendingConfirmation = null;
 let confirmationResolver = null;
-let activeModel = 'gemini-3.5-flash';
+let activeModel = 'gemini-2.5-flash';
 let activeMode = 'ask';
 let activeSelection = '';
 
@@ -214,11 +214,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
     userGoal = request.goal;
-    activeModel = request.model || 'gemini-3.5-flash';
+    activeModel = request.model || 'gemini-2.5-flash';
     activeMode = request.mode || 'ask';
     activeSelection = request.selection || '';
     agentLoopActive = true;
     executionHistory = [];
+    addLog(`[User Goal] ${userGoal}`, 'user-log'); // persisted so reopening the panel restores the user bubble
     startAgentLoop();
     sendResponse({ success: true });
   } else if (request.type === 'STOP_AGENT') {

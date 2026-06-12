@@ -1,3 +1,5 @@
+import { renderMarkdown } from './lib/markdown.js';
+
 // UI Elements
 const chatContainer = document.getElementById('chat-container');
 const goalInput = document.getElementById('goal-input');
@@ -279,6 +281,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.type === 'STATE_CHANGED') {
     currentAgentState = message.state;
     updateUIState(message.state);
+    if (message.state === 'idle' || message.state === 'error') {
+      finishWorkCard(message.state === 'error');
+    }
   } else if (message.type === 'CONFIRMATION_REQUIRED') {
     renderConfirmationCard(message.decision);
   } else if (message.type === 'SELECTION_UPDATED') {
@@ -286,79 +291,187 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// ===== Working-process card (Claude in Chrome style) =====
+// All step logs of one agent run collapse into a single expandable card;
+// the chat thread keeps only user messages and final answers as bubbles.
+let activeWorkCard = null; // { card, body, statusText, stepEl, steps }
+
+function createWorkCard() {
+  const card = document.createElement('div');
+  card.className = 'work-card running';
+
+  const header = document.createElement('div');
+  header.className = 'work-header';
+
+  const spinner = document.createElement('span');
+  spinner.className = 'work-spinner';
+
+  const statusText = document.createElement('span');
+  statusText.className = 'work-status';
+  statusText.textContent = 'Starting…';
+
+  const stepEl = document.createElement('span');
+  stepEl.className = 'work-step';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'work-chevron';
+  chevron.textContent = '▸';
+
+  header.appendChild(spinner);
+  header.appendChild(statusText);
+  header.appendChild(stepEl);
+  header.appendChild(chevron);
+
+  const body = document.createElement('div');
+  body.className = 'work-body';
+
+  header.addEventListener('click', () => {
+    card.classList.toggle('expanded');
+    chevron.textContent = card.classList.contains('expanded') ? '▾' : '▸';
+  });
+
+  card.appendChild(header);
+  card.appendChild(body);
+  chatContainer.appendChild(card);
+  scrollChatToBottom();
+
+  return { card, body, statusText, stepEl, steps: 0 };
+}
+
+function ensureWorkCard() {
+  if (!activeWorkCard) activeWorkCard = createWorkCard();
+  return activeWorkCard;
+}
+
+function appendWorkLine(text, category) {
+  const wc = ensureWorkCard();
+  const line = document.createElement('div');
+  line.className = `work-line ${category}`;
+  line.textContent = text;
+  wc.body.appendChild(line);
+  scrollChatToBottom();
+}
+
+function setWorkStatus(text, isError) {
+  const wc = ensureWorkCard();
+  wc.statusText.textContent = text.length > 70 ? text.slice(0, 70) + '…' : text;
+  wc.statusText.classList.toggle('error', !!isError);
+}
+
+function finishWorkCard(failed) {
+  if (!activeWorkCard) return;
+  const wc = activeWorkCard;
+  const hadError = wc.statusText.classList.contains('error');
+  const isFailed = failed || hadError;
+  wc.card.classList.remove('running');
+  wc.card.classList.add(isFailed ? 'failed' : 'done');
+  const stepInfo = wc.steps > 0 ? ` · ${wc.steps} steps` : '';
+  wc.statusText.textContent = (isFailed ? 'Stopped' : 'Finished') + stepInfo;
+  wc.statusText.classList.remove('error');
+  activeWorkCard = null;
+}
+
 // Parse background logs and render as clean Chat UI elements
 function handleIncomingLog(text, type) {
   if (type === 'user-log') {
     // Already appended locally by user click
     return;
   }
-  
+
   if (type === 'thought-log') {
-    // Append thought card
-    appendThoughtCard(text);
+    appendWorkLine(text, 'thought');
+    setWorkStatus(text.replace('[AI Thought]', '💭').trim());
   } else if (type === 'success-log') {
     if (text.startsWith('[AI Final Answer]')) {
       const answer = text.replace('[AI Final Answer]', '').trim();
+      finishWorkCard(false);
       appendChatMessage('assistant', answer);
+    } else if (activeWorkCard) {
+      appendWorkLine(text, 'success');
     } else {
       appendSystemLog(text, 'success');
     }
   } else if (type === 'error-log') {
-    appendSystemLog(text, 'error');
+    // Errors outside an agent run (e.g. model list warning at panel open)
+    // stay as plain log lines instead of spawning a work card.
+    if (activeWorkCard) {
+      appendWorkLine(text, 'error');
+      setWorkStatus(text, true);
+    } else {
+      appendSystemLog(text, 'error');
+    }
   } else if (type === 'action-log') {
-    appendSystemLog(text, 'action');
+    appendWorkLine(text, 'action');
+    setWorkStatus(text.replace('[AI Action]', '⚡').trim());
   } else {
-    appendSystemLog(text, 'system');
+    // system-log
+    if (text.includes('Initializing Gemini Browser Agent loop')) {
+      finishWorkCard(true); // close any stale card from a previous run
+      ensureWorkCard();
+      appendWorkLine(text, 'system');
+      return;
+    }
+    const stepMatch = text.match(/--- Step (\d+) of \d+ ---/);
+    if (activeWorkCard) {
+      appendWorkLine(text, 'system');
+      if (stepMatch) {
+        activeWorkCard.steps = parseInt(stepMatch[1], 10);
+        activeWorkCard.stepEl.textContent = `Step ${stepMatch[1]}`;
+      } else if (text.includes('Reading DOM')) {
+        setWorkStatus('Reading page…');
+      } else if (text.includes('Consulting Gemini')) {
+        setWorkStatus('Thinking…');
+      } else if (text.includes('Waiting for safety confirmation')) {
+        setWorkStatus('Waiting for your approval…');
+      }
+    } else {
+      appendSystemLog(text, 'system');
+    }
   }
 }
 
 function restoreLogsAsChat(logs) {
   chatContainer.innerHTML = '';
+  activeWorkCard = null;
   // Initial Greeting
   appendChatMessage('assistant', 'Hello! I am your Antigravity Gemini Browser Agent. Ask me a question about this page, or enter a goal for me to automate.');
-  
+
   logs.forEach(log => {
     if (log.type === 'user-log') {
+      finishWorkCard(true); // close card from a previous run before the next user turn
       const uMsg = log.text.replace('[User Goal]', '').trim();
       appendChatMessage('user', uMsg);
     } else {
       handleIncomingLog(log.text, log.type);
     }
   });
+
+  // If the agent is not running anymore, no card should stay "running"
+  if (currentAgentState === 'idle' || currentAgentState === 'error') {
+    finishWorkCard(currentAgentState === 'error');
+  }
 }
 
 // Chat UI Appenders
 function appendChatMessage(sender, text) {
   const msgDiv = document.createElement('div');
   msgDiv.className = `chat-message ${sender}`;
-  
+
   const contentDiv = document.createElement('div');
   contentDiv.className = 'message-content';
-  
-  const p = document.createElement('p');
-  p.textContent = text;
-  
-  contentDiv.appendChild(p);
+
+  if (sender === 'assistant') {
+    // renderMarkdown escapes all input HTML before transforming,
+    // so this innerHTML only ever contains tags the renderer emits.
+    contentDiv.innerHTML = renderMarkdown(text);
+  } else {
+    const p = document.createElement('p');
+    p.textContent = text;
+    contentDiv.appendChild(p);
+  }
+
   msgDiv.appendChild(contentDiv);
   chatContainer.appendChild(msgDiv);
-  scrollChatToBottom();
-}
-
-function appendThoughtCard(text) {
-  const card = document.createElement('div');
-  card.className = 'thought-card';
-  
-  const header = document.createElement('div');
-  header.className = 'thought-header';
-  header.textContent = 'Thought Process';
-  
-  const body = document.createElement('div');
-  body.className = 'thought-body';
-  body.textContent = text;
-  
-  card.appendChild(header);
-  card.appendChild(body);
-  chatContainer.appendChild(card);
   scrollChatToBottom();
 }
 
