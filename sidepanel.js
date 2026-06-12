@@ -6,7 +6,15 @@ const sendIcon = document.getElementById('send-icon');
 const stopIcon = document.getElementById('stop-icon');
 const modelSelect = document.getElementById('model-select');
 const newChatBtn = document.getElementById('new-chat-btn');
-const authBtn = document.getElementById('auth-btn');
+
+// Settings Elements
+const settingsBtn = document.getElementById('settings-btn');
+const settingsPanel = document.getElementById('settings-panel');
+const proxyUrlInput = document.getElementById('proxy-url-input');
+const apiKeyInput = document.getElementById('api-key-input');
+const visionToggle = document.getElementById('vision-toggle');
+const testConnectionBtn = document.getElementById('test-connection-btn');
+const connectionStatus = document.getElementById('connection-status');
 
 // Selection Elements
 const selectionBadge = document.getElementById('selection-badge');
@@ -27,19 +35,14 @@ let currentAgentState = 'idle';
 // Initialize Panel
 document.addEventListener('DOMContentLoaded', async () => {
   // Load saved configurations from storage
-  chrome.storage.local.get(['selectedModel', 'actionMode'], (items) => {
-    if (items.selectedModel) {
-      const optionExists = Array.from(modelSelect.options).some(opt => opt.value === items.selectedModel);
-      if (optionExists) {
-        modelSelect.value = items.selectedModel;
-      } else {
-        // Saved model is deprecated/invalid, save the new default model instead
-        chrome.storage.local.set({ selectedModel: modelSelect.value });
-      }
-    }
+  chrome.storage.local.get(['selectedModel', 'actionMode', 'proxyUrl', 'apiKey', 'visionMode'], (items) => {
     if (items.actionMode) {
       updateActionMode(items.actionMode);
     }
+    if (items.proxyUrl) proxyUrlInput.value = items.proxyUrl;
+    if (items.apiKey) apiKeyInput.value = items.apiKey;
+    visionToggle.checked = items.visionMode !== false; // default on
+    refreshModelList(false);
   });
 
   // Sync UI state with background script
@@ -48,7 +51,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       currentAgentState = response.state;
       updateUIState(response.state);
       restoreLogsAsChat(response.logs);
-      checkOAuthStatus(false); // Silent check
       if (response.selection) {
         showSelectionBadge(response.selection);
       }
@@ -60,6 +62,70 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Start polling webpage selection
   setInterval(pollSelection, 1000);
+});
+
+// Settings panel toggle + persistence
+settingsBtn.addEventListener('click', () => {
+  settingsPanel.classList.toggle('hidden');
+});
+
+function saveSettings() {
+  chrome.storage.local.set({
+    proxyUrl: proxyUrlInput.value.trim(),
+    apiKey: apiKeyInput.value.trim(),
+    visionMode: visionToggle.checked
+  });
+}
+proxyUrlInput.addEventListener('change', saveSettings);
+apiKeyInput.addEventListener('change', saveSettings);
+visionToggle.addEventListener('change', saveSettings);
+
+// Fallback used when the proxy is unreachable at panel-open time
+const DEFAULT_MODELS = [
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (offline default)' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (offline default)' }
+];
+
+function setConnectionStatus(text, ok) {
+  connectionStatus.textContent = text;
+  connectionStatus.className = `connection-status ${ok ? 'ok' : 'fail'}`;
+}
+
+function populateModelSelect(models, savedModel) {
+  modelSelect.innerHTML = '';
+  models.forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label;
+    modelSelect.appendChild(opt);
+  });
+  if (savedModel && models.some((m) => m.id === savedModel)) {
+    modelSelect.value = savedModel;
+  } else {
+    chrome.storage.local.set({ selectedModel: modelSelect.value });
+  }
+}
+
+function refreshModelList(showStatus) {
+  chrome.runtime.sendMessage({ type: 'LIST_MODELS' }, (response) => {
+    chrome.storage.local.get(['selectedModel'], (items) => {
+      if (response && response.success && response.models.length > 0) {
+        populateModelSelect(response.models, items.selectedModel);
+        if (showStatus) setConnectionStatus(`Connected — ${response.models.length} models available`, true);
+      } else {
+        populateModelSelect(DEFAULT_MODELS, items.selectedModel);
+        const error = (response && response.error) || 'Empty model list from proxy.';
+        appendLog(`[System Warning] Could not load model list (${error}). Using offline defaults.`, 'error-log');
+        if (showStatus) setConnectionStatus(error, false);
+      }
+    });
+  });
+}
+
+testConnectionBtn.addEventListener('click', () => {
+  saveSettings();
+  setConnectionStatus('Testing…', true);
+  refreshModelList(true);
 });
 
 // Model selection change
@@ -150,11 +216,6 @@ newChatBtn.addEventListener('click', () => {
   appendChatMessage('assistant', 'Hello! I am your Antigravity Gemini Browser Agent. Ask me a question about this page, or enter a goal for me to automate.');
   chrome.runtime.sendMessage({ type: 'CLEAR_LOGS' });
   appendLog('[System] Chat history cleared.', 'system-log');
-});
-
-// Authorization Button
-authBtn.addEventListener('click', () => {
-  checkOAuthStatus(true);
 });
 
 // Textarea auto-height adjustment
@@ -333,21 +394,6 @@ function updateUIState(state) {
     stopIcon.classList.remove('hidden');
     sendBtn.disabled = false; // Always allow stop click
   }
-}
-
-// Authorization check helper
-async function checkOAuthStatus(interactive = false) {
-  chrome.runtime.sendMessage({ type: 'CHECK_AUTH', interactive: interactive }, (response) => {
-    if (response && response.success) {
-      authBtn.classList.remove('auth-inactive');
-      authBtn.classList.add('auth-active');
-      authBtn.title = 'Google Account Authorized';
-    } else {
-      authBtn.classList.remove('auth-active');
-      authBtn.classList.add('auth-inactive');
-      authBtn.title = 'Authorize Google Account';
-    }
-  });
 }
 
 // Confirmation Card

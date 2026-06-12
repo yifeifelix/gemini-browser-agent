@@ -13,9 +13,8 @@
       <div class="header-left">
         <div class="custom-select-wrapper">
           <select id="model-select" class="model-select">
-            <option value="gemini-3.5-flash" selected>Gemini 3.5 Flash</option>
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (offline default)</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro (offline default)</option>
           </select>
         </div>
       </div>
@@ -28,15 +27,33 @@
             <line x1="9" y1="10" x2="15" y2="10"></line>
           </svg>
         </button>
-        <!-- Authorize Button -->
-        <button id="auth-btn" class="header-icon-btn auth-inactive" title="Authorize Google Account">
+        <!-- Settings Button -->
+        <button id="settings-btn" class="header-icon-btn" title="Settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-            <circle cx="12" cy="7" r="4"></circle>
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
           </svg>
         </button>
       </div>
     </header>
+
+    <!-- Settings Panel (collapsible) -->
+    <div id="settings-panel" class="settings-panel hidden">
+      <label class="settings-label">Proxy URL
+        <input id="proxy-url-input" type="text" placeholder="http://127.0.0.1:8317">
+      </label>
+      <label class="settings-label">API Key
+        <input id="api-key-input" type="password" placeholder="CLIProxyAPI api-key">
+      </label>
+      <label class="settings-toggle">
+        <input id="vision-toggle" type="checkbox" checked>
+        Vision mode (send page screenshot)
+      </label>
+      <div class="settings-actions">
+        <button id="test-connection-btn" class="test-connection-btn">Test Connection</button>
+        <span id="connection-status" class="connection-status"></span>
+      </div>
+    </div>
 
     <!-- Chat & Execution Thread -->
     <main class="chat-area">

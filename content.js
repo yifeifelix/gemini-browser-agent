@@ -12,6 +12,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.type === 'GET_SELECTION') {
     const selectedText = window.getSelection ? window.getSelection().toString() : '';
     sendResponse({ selection: selectedText });
+  } else if (request.type === 'SHOW_MARKERS') {
+    sendResponse(showMarkers());
+  } else if (request.type === 'HIDE_MARKERS') {
+    sendResponse(hideMarkers());
   }
   return true; // Keep message channel open for async response
 });
@@ -158,4 +162,45 @@ function executeAction(action, targetId, value) {
   } catch (err) {
     return { success: false, error: `Error executing action on element ID="${targetId}": ${err.message}` };
   }
+}
+
+// ===== Set-of-Marks visual markers =====
+// Draws numbered badges over interactive elements so a page screenshot
+// can be visually aligned with the INTERACTIVE_ELEMENTS id list.
+const MARKER_OVERLAY_ID = 'gemini-agent-marker-overlay';
+
+function showMarkers() {
+  hideMarkers();
+  const overlay = document.createElement('div');
+  overlay.id = MARKER_OVERLAY_ID;
+  overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;';
+
+  document.querySelectorAll('[data-agent-id]').forEach((el) => {
+    if (!isElementVisible(el)) return;
+    const rect = el.getBoundingClientRect();
+    // Skip elements scrolled out of the viewport — they won't be in the screenshot
+    if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+    if (rect.right < 0 || rect.left > window.innerWidth) return;
+
+    const badge = document.createElement('div');
+    badge.textContent = el.getAttribute('data-agent-id');
+    badge.style.cssText =
+      'position:absolute;' +
+      `top:${Math.max(rect.top - 8, 0)}px;` +
+      `left:${Math.max(rect.left - 4, 0)}px;` +
+      'background:#d93025;color:#ffffff;' +
+      'font:bold 11px/1.4 Arial, sans-serif;' +
+      'padding:0 4px;border-radius:3px;' +
+      'box-shadow:0 0 0 1px #ffffff;';
+    overlay.appendChild(badge);
+  });
+
+  document.body.appendChild(overlay);
+  return { success: true, count: overlay.childElementCount };
+}
+
+function hideMarkers() {
+  const existing = document.getElementById(MARKER_OVERLAY_ID);
+  if (existing) existing.remove();
+  return { success: true };
 }
