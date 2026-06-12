@@ -376,14 +376,37 @@ async function startAgentLoop() {
       }
 
       const responseJson = await response.json();
-      const responseText = responseJson.candidates[0].content.parts[0].text;
-      
+      const candidate = responseJson.candidates && responseJson.candidates[0];
+      const responseText = candidate && candidate.content && candidate.content.parts &&
+        candidate.content.parts[0] && candidate.content.parts[0].text;
+
+      if (!responseText) {
+        const blockReason = (candidate && candidate.finishReason) ||
+          (responseJson.promptFeedback && responseJson.promptFeedback.blockReason) || 'empty response';
+        throw new Error(`Model returned no usable text (${blockReason}).`);
+      }
+
+      // Parse JSON action — model output can be truncated (MAX_TOKENS) or
+      // degenerate. Recover by asking the model to retry instead of dying.
+      let agentDecision;
+      try {
+        agentDecision = JSON.parse(responseText);
+      } catch (parseErr) {
+        const why = candidate.finishReason === 'MAX_TOKENS'
+          ? 'output hit the token limit and was cut off mid-JSON'
+          : `output was not valid JSON (${parseErr.message})`;
+        addLog(`[System Warning] Model response unusable: ${why}. Asking model to retry...`, 'error-log');
+        // Keep only a stub in history — appending megabytes of broken output
+        // would poison and bloat every subsequent request.
+        executionHistory.push({ role: 'model', text: responseText.slice(0, 300) + '…(truncated, invalid)' });
+        lastActionResult = `Failure. Your previous response ${why}. Respond again with exactly ONE valid JSON object. Keep "thought" to one or two sentences and "finalAnswer" focused — never repeat content.`;
+        currentStep++;
+        continue;
+      }
+
       // Append model response to API history
       executionHistory.push({ role: 'model', text: responseText });
 
-      // Parse JSON action
-      const agentDecision = JSON.parse(responseText);
-      
       addLog(`[AI Thought] ${agentDecision.thought}`, 'thought-log');
 
       // 5. Check action
