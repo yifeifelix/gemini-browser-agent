@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (items.proxyUrl) proxyUrlInput.value = items.proxyUrl;
     if (items.apiKey) apiKeyInput.value = items.apiKey;
     visionToggle.checked = items.visionMode !== false; // default on
+    refreshModelList(false);
   });
 
   // Sync UI state with background script
@@ -78,6 +79,54 @@ function saveSettings() {
 proxyUrlInput.addEventListener('change', saveSettings);
 apiKeyInput.addEventListener('change', saveSettings);
 visionToggle.addEventListener('change', saveSettings);
+
+// Fallback used when the proxy is unreachable at panel-open time
+const DEFAULT_MODELS = [
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (offline default)' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (offline default)' }
+];
+
+function setConnectionStatus(text, ok) {
+  connectionStatus.textContent = text;
+  connectionStatus.className = `connection-status ${ok ? 'ok' : 'fail'}`;
+}
+
+function populateModelSelect(models, savedModel) {
+  modelSelect.innerHTML = '';
+  models.forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label;
+    modelSelect.appendChild(opt);
+  });
+  if (savedModel && models.some((m) => m.id === savedModel)) {
+    modelSelect.value = savedModel;
+  } else {
+    chrome.storage.local.set({ selectedModel: modelSelect.value });
+  }
+}
+
+function refreshModelList(showStatus) {
+  chrome.runtime.sendMessage({ type: 'LIST_MODELS' }, (response) => {
+    chrome.storage.local.get(['selectedModel'], (items) => {
+      if (response && response.success && response.models.length > 0) {
+        populateModelSelect(response.models, items.selectedModel);
+        if (showStatus) setConnectionStatus(`Connected — ${response.models.length} models available`, true);
+      } else {
+        populateModelSelect(DEFAULT_MODELS, items.selectedModel);
+        const error = (response && response.error) || 'Empty model list from proxy.';
+        appendLog(`[System Warning] Could not load model list (${error}). Using offline defaults.`, 'error-log');
+        if (showStatus) setConnectionStatus(error, false);
+      }
+    });
+  });
+}
+
+testConnectionBtn.addEventListener('click', () => {
+  saveSettings();
+  setConnectionStatus('Testing…', true);
+  refreshModelList(true);
+});
 
 // Model selection change
 modelSelect.addEventListener('change', () => {
