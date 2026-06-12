@@ -82,7 +82,8 @@ Rules:
 3. If you have achieved the user's goal (e.g., found the information, finished the task), set action to "done" and write your findings in "finalAnswer".
 3b. finalAnswer quality: when the goal asks a question, requests an explanation, or asks you to read/summarize page content, write a DETAILED, well-structured answer in Markdown (use headings, bullet lists, and code blocks where helpful) in the same language the user used. Cover the substance fully — do not compress it into one or two sentences. Brief answers are only acceptable for simple action confirmations (e.g. "Opened YouTube").
 4. If you hit an obstacle you cannot overcome (e.g. repeated failures, missing pages, captchas), set action to "fail" and explain the problem in "finalAnswer".
-5. If the DOM context indicates it is not accessible, you cannot perform browser actions like click, input, select, or pressEnter. However, if the user's goal is to visit a website (e.g. "open YouTube"), you should set action to "navigate" and value to the URL. Otherwise, set action to "done" and output your response in "finalAnswer".`;
+5. Anti-loop rule: if the same action on the same element has already been tried twice without producing the expected change, do NOT try it again. Change strategy, or set action to "fail" and explain what is blocking you.
+6. If the DOM context indicates it is not accessible, you cannot perform browser actions like click, input, select, or pressEnter. However, if the user's goal is to visit a website (e.g. "open YouTube"), you should set action to "navigate" and value to the URL. Otherwise, set action to "done" and output your response in "finalAnswer".`;
 
 // Send state update to sidepanel if open
 function updateState(newState) {
@@ -481,24 +482,50 @@ async function startAgentLoop() {
           executionResult = { success: false, error: err.message };
         }
       } else {
-        executionResult = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(
-            activeTab.id, 
-            { 
-              type: 'EXECUTE_ACTION', 
-              action: agentDecision.action, 
-              targetId: agentDecision.targetId,
-              value: agentDecision.value
-            }, 
-            (res) => {
-              if (chrome.runtime.lastError) {
-                resolve({ success: false, error: chrome.runtime.lastError.message });
-              } else {
-                resolve(res);
-              }
+        executionResult = null;
+
+        // For input actions, first try the page MAIN world where editor
+        // globals (window.monaco) live — synthetic events from the isolated
+        // world are silently ignored by Monaco-based editors (LeetCode etc.).
+        if (agentDecision.action === 'input') {
+          try {
+            const [injection] = await chrome.scripting.executeScript({
+              target: { tabId: activeTab.id },
+              world: 'MAIN',
+              func: trySetEditorValueMainWorld,
+              args: [agentDecision.targetId, agentDecision.value]
+            });
+            if (injection && injection.result && injection.result.handled) {
+              executionResult = {
+                success: true,
+                message: `Editor content set via ${injection.result.how} (${agentDecision.value.length} chars, previous content fully replaced).`
+              };
             }
-          );
-        });
+          } catch (e) {
+            // MAIN-world injection unavailable on this page — fall through
+          }
+        }
+
+        if (!executionResult) {
+          executionResult = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(
+              activeTab.id,
+              {
+                type: 'EXECUTE_ACTION',
+                action: agentDecision.action,
+                targetId: agentDecision.targetId,
+                value: agentDecision.value
+              },
+              (res) => {
+                if (chrome.runtime.lastError) {
+                  resolve({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                  resolve(res);
+                }
+              }
+            );
+          });
+        }
       }
 
       if (executionResult.success) {
@@ -566,6 +593,40 @@ function validateAndSanitizeAction(decision, domContext) {
     }
   }
   return { valid: true };
+}
+
+// Sets a code editor's value from the page MAIN world via the editor's own
+// API (window.monaco). Runs INSIDE the page via chrome.scripting — must be
+// fully self-contained (no references to extension scope).
+function trySetEditorValueMainWorld(agentId, value) {
+  const el = document.querySelector(`[data-agent-id="${agentId}"]`);
+  if (!el) return { handled: false, reason: 'element not found' };
+
+  const monacoHost = el.closest('.monaco-editor');
+  const monacoApi = window.monaco && window.monaco.editor;
+  if (!monacoHost || !monacoApi) return { handled: false, reason: 'not a monaco editor' };
+
+  const editors = typeof monacoApi.getEditors === 'function' ? monacoApi.getEditors() : [];
+  let target = null;
+  for (const ed of editors) {
+    const node = typeof ed.getDomNode === 'function' && ed.getDomNode();
+    if (node && (node === monacoHost || node.contains(el) || monacoHost.contains(node))) {
+      target = ed;
+      break;
+    }
+  }
+  if (!target && editors.length === 1) target = editors[0];
+  if (target) {
+    target.setValue(value);
+    return { handled: true, how: 'monaco editor API' };
+  }
+
+  const models = typeof monacoApi.getModels === 'function' ? monacoApi.getModels() : [];
+  if (models.length === 1) {
+    models[0].setValue(value);
+    return { handled: true, how: 'monaco model API' };
+  }
+  return { handled: false, reason: 'monaco instance not located' };
 }
 
 // Returns the simplified-DOM line describing an element, so confirmation
