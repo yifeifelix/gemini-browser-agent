@@ -1,79 +1,158 @@
-# Gemini Browser Agent（订阅版）
+# Gemini Browser Agent
 
-把 Google Gemini 变成浏览器自动化助手的 Chrome 扩展，对标 Claude in Chrome 的体验。
-**直接使用你的 Google 订阅（Google AI Pro 等）额度**，无需 API Key 计费——通过本地
-[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 代理将订阅通道转换为标准 Gemini API。
+A Manifest V3 Chrome extension that turns Google Gemini into an agentic browser assistant — built to match the Claude in Chrome experience while running directly on your **Google subscription quota (Google AI Pro, etc.)** without per-token API billing. It bridges subscription accounts via a local [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) proxy, provides Set-of-Marks visual grounding, and executes autonomous multi-step DOM automation with strict safety guardrails.
 
-## 工作原理
+It supports:
 
-```
-扩展侧边栏 → background.js → http://127.0.0.1:8317（CLIProxyAPI）→ Google 订阅通道
-```
+- Running directly on Google One / Google AI Pro subscription quotas via local CLIProxyAPI, or switching to Google AI Studio API keys on the fly
+- Set-of-Marks (SoM) visual grounding: draws numbered badges on interactive DOM elements and captures JPEG viewport screenshots so Gemini can visually inspect layout and spatial context
+- Sliding-window context compression: caps DOM snapshots at an 8,000-character budget and collapses prior turns to one-line summaries to eliminate token budget explosion
+- High-fidelity editor input: writes code directly into Monaco (e.g. LeetCode) and CodeMirror instances via page MAIN-world API injection and synthetic clipboard paste events, preserving indentation and bypassing event isolation
+- Cookie & GDPR overlay management: automatically identifies and declines consent overlays ("Reject all" / "Decline") before proceeding with the user's task
+- Comprehensive safety guardrails: prompt injection defense, automatic PII redaction (passwords, cards, tokens, emails), RFC1918 private network blocking, and mandatory approval for high-risk operations (payment, deletion, login)
+- Zero-build architecture: pure Manifest V3 ES modules, native CSS, and Node native `node:test` suite with zero runtime npm dependencies
 
-扩展只和本机代理通信；登录 Google、刷新凭证、订阅额度调度全部由 CLIProxyAPI 处理。
+## Core advantages
 
-## 安装步骤
+| Advantage | Practical value |
+|---|---|
+| Subscription-first quota routing | Calls standard Gemini API endpoints via a local CLIProxyAPI instance, consuming existing Google AI Pro subscription quotas instead of metered AI Studio API billing or fragile free-tier limits. |
+| Set-of-Marks visual + structural hybrid execution | Viewport screenshots with numbered badges give Gemini spatial awareness, while actions execute strictly against verified element IDs from the simplified DOM tree — eliminating fragile coordinate-based clicking. |
+| Sliding-window context compression | Only the active step sends the full DOM snapshot and screenshot. Prior user turns collapse into single-line summaries, preventing context window bloat and runaway token consumption over 10+ step runs. |
+| Editor-aware input engine | Bypasses browser isolated-world restrictions to invoke `window.monaco.editor` directly from the page MAIN world and fires synthetic paste events to prevent auto-indent mangling. |
+| Self-healing response parsing | When model output is truncated by token limits or emits invalid JSON, the runtime intercepts the failure, reports the issue back into context, and prompts targeted self-healing rather than aborting. |
+| Zero-build, zero-dependency stack | No Webpack, Vite, or external dependencies. Runs directly as native browser ES modules, testable offline with Node's built-in `node:test`. |
 
-### 第 1 步：安装并配置 CLIProxyAPI（每台电脑一次）
+## What it changes
 
-1. 从 [CLIProxyAPI Releases](https://github.com/router-for-me/CLIProxyAPI/releases/latest) 下载对应系统版本并解压。
-   - Windows 下载文件名形如 `CLIProxyAPI_x.y.z_windows_amd64.zip`（在 Assets 列表里，不是 Source code 包）。
-   - Windows 用户也可选择带图形界面的 [ProxyPilot](https://github.com/Finesssee/ProxyPilot) 或 [EasyCLI](https://github.com/router-for-me/EasyCLI)。
-2. 编辑 `config.yaml`：在 `api-keys:` 下添加一个自定义密钥（例如 `my-family-key-2026`），其余保持默认（端口 8317）。
-3. 启动代理，按提示用 **Gemini 登录**（`--login` 参数或 GUI 内登录），用你自己的 Google 订阅账号完成 OAuth。
-4. 保持代理在后台运行（可配置开机自启）。
+| Default browser agent behaviour | With Gemini Browser Agent |
+|---|---|
+| Re-sends full DOM tree and images on every step | Collapses prior DOM snapshots to summaries; only active step retains full DOM & image |
+| Hardcodes a static model dropdown | Dynamically queries `/v1beta/models` on startup to surface account-specific models |
+| Mangled code or ignored input in complex code editors | Uses page MAIN-world API injection (`window.monaco`) and clipboard paste dispatch |
+| Blind coordinate clicking | Set-of-Marks numbered badges mapped to DOM element IDs |
+| Stalls on GDPR/cookie popups | Dedicated prompt directive mandates immediate "Reject all" / "Decline" before executing user goals |
+| Aborts run on JSON parsing error | Traps truncation or malformed JSON, retains minimal stub, and asks Gemini to correct its output |
+| Allows internal intranet navigation | Blocks `localhost`, `127.0.0.1`, and private RFC1918 IPv4 ranges (10.x, 172.16-31.x, 192.168.x) |
 
-### 备选：不装代理，直接用 AI Studio API Key
+## Architecture
 
-如果暂时不想安装本地代理，可以直接连 Google 官方 API（注意：走的是 API 免费层/付费层额度，**不是订阅额度**，免费层重度使用会限流）：
-
-1. 到 [Google AI Studio](https://aistudio.google.com/apikey) 创建一个 API Key。
-2. 扩展设置中：Proxy URL 填 `https://generativelanguage.googleapis.com`，API Key 填刚创建的 Key。
-3. 点 Test Connection，模型列表会直接从官方接口加载。
-
-两种模式可随时在设置里切换，接口格式完全相同。
-
-### 第 2 步：安装扩展
-
-1. Chrome 打开 `chrome://extensions/`，开启右上角「开发者模式」。
-2. 点击「加载已解压的扩展程序」，选择本项目文件夹。
-3. 把扩展固定到工具栏。
-
-### 第 3 步：连接
-
-1. 点击扩展图标打开侧边栏，点击右上角 ⚙️ 设置按钮。
-2. Proxy URL 保持 `http://127.0.0.1:8317`，API Key 填第 1 步在 `config.yaml` 里设置的值。
-3. 点击 **Test Connection**——显示绿色 `Connected` 即成功，顶部模型下拉框会列出你账号实际可用的模型。
-
-## 使用
-
-1. 打开要操作的网页（`chrome://` 内部页面和应用商店除外）。
-2. 在侧边栏输入目标，例如「搜索 DeepMind 并告诉我第一段内容」。
-3. 观察 agent 思考 → 行动 → 汇报。随时可点停止。
-
-- **Vision mode**（设置中，默认开）：每步附带页面截图（带红色编号角标），模型能「看见」页面布局。token 消耗更高但理解力更强。
-- **Action Mode**：`Ask before acting` 每步确认 / `Act without asking` 自动执行（高危操作仍会强制确认）。
-
-## 安全机制
-
-- **Prompt 注入防护**：网页内容被严格视为数据；系统提示词明确禁止执行页面中嵌入的指令。
-- **PII 脱敏**：密码、卡号、邮箱等敏感字段值在发送前替换为 `[REDACTED_PII]`。
-- **高危操作拦截**：支付/删除/登录/提交类按钮即使在自动模式下也强制人工确认；`Ask before acting` 模式下每一步都需确认。
-- **导航安全**：所有跳转 URL 强制 HTTPS，内网/本机地址（localhost、私有 IP 段）一律拦截。
-- **权限说明**：为了让 agent 在自己导航后还能继续读取和操作页面（多步跨页任务的前提），扩展申请了全站点访问权限——与 Claude in Chrome 等浏览器 agent 产品相同的权限模式。扩展仅在你主动下达任务时才读取页面。
-- **本地通信**：API Key 仅发送到你自己配置的本机代理，不经过任何第三方服务器。
-
-## 开发
-
-```powershell
-npm test   # 运行 lib/ 纯函数单元测试（Node >= 20）
+```text
+Extension Side Panel UI (sidepanel.js)
+           │
+           ▼
+Service Worker (background.js) ──► ReAct Loop (max 15 steps)
+     │            │
+     │            ├─► Content Script (content.js)
+     │            │    ├─ DOM simplification & PII redaction
+     │            │    ├─ Set-of-Marks visual badges overlay
+     │            │    └─ Native / MAIN-world action dispatch
+     │            │
+     ▼            └─► HTTP POST /v1beta/models/{model}:generateContent
+Local Proxy (CLIProxyAPI on 127.0.0.1:8317)  ◄── OR ──► Google AI Studio API
+     │ (Gemini CLI OAuth Session)
+     ▼
+Google Subscription Quota (Google AI Pro, etc.)
 ```
 
-## 故障排查
+1. **Side Panel**: Collects user goals, handles settings, surfaces active DOM selection, and manages step-by-step human confirmation.
+2. **Background Orchestrator**: Runs the ReAct agent loop (up to 15 steps per task), manages model conversation history, enforces safety filters, handles 429 backoff retries, and coordinates actions.
+3. **Content Script**: Scans visible interactive elements, redacts sensitive PII, projects Set-of-Marks numbered badges for screenshots, and executes simulated DOM actions.
+4. **Local Proxy**: Translates standard Gemini API calls into authenticated requests using your Google subscription OAuth session.
 
-| 现象 | 处理 |
-|------|------|
-| `Cannot reach the local proxy` | 确认 CLIProxyAPI 正在运行、端口 8317 未被占用 |
-| `HTTP 401/403` | 扩展设置中的 API Key 与代理 `config.yaml` 的 `api-keys` 不一致 |
-| 模型列表只有 offline default | 点 Test Connection 重试；检查代理是否完成 Google 登录 |
-| 429 限流 | 扩展会自动等待重试；频繁出现说明订阅额度耗尽，等待额度窗口刷新 |
+## Install
+
+### Step 1: Set up CLIProxyAPI (Once per machine)
+
+1. Download the latest binary from [CLIProxyAPI Releases](https://github.com/router-for-me/CLIProxyAPI/releases/latest) (on Windows, choose `CLIProxyAPI_x.y.z_windows_amd64.zip`, or GUI tools like [ProxyPilot](https://github.com/Finesssee/ProxyPilot) / [EasyCLI](https://github.com/router-for-me/EasyCLI)).
+2. Edit `config.yaml`: Add a custom key under `api-keys:` (e.g. `my-local-secret-key`), keeping the default port `8317`.
+3. Start the proxy and complete the Google login prompt (`--login` flag or GUI button) using your Google subscription account.
+4. Keep the proxy running in the background.
+
+#### Alternative: Direct Google AI Studio API Key
+
+If you prefer not to run a local proxy, you can connect directly to Google's official endpoints (note: this uses API tier quotas, not subscription quotas):
+
+1. Obtain an API Key from [Google AI Studio](https://aistudio.google.com/apikey).
+2. In the extension settings: set **Proxy URL** to `https://generativelanguage.googleapis.com` and paste your **API Key**.
+3. Click **Test Connection** to fetch models directly.
+
+### Step 2: Install the Chrome Extension
+
+1. Open Chrome and navigate to `chrome://extensions/`.
+2. Enable **Developer mode** in the top-right corner.
+3. Click **Load unpacked** and select this repository folder.
+4. Pin **Gemini Browser Agent** to your Chrome toolbar.
+
+### Step 3: Connect & Test
+
+1. Click the extension icon in your toolbar to open the side panel.
+2. Click the ⚙️ **Settings** button in the top-right corner of the panel.
+3. Confirm **Proxy URL** is set to `http://127.0.0.1:8317` and enter the key configured in `config.yaml`.
+4. Click **Test Connection** — a green `Connected` badge confirms connectivity, and the model dropdown will populate with available models.
+
+## Use
+
+1. Navigate to any webpage you want to automate (excluding restricted `chrome://` internal pages and the Chrome Web Store).
+2. Enter your goal in the side panel (e.g. *"Search GitHub for fast text extractors and summarize the top three results"*).
+3. Watch the agent think, execute actions, and stream responses. You can click **Stop** at any point.
+
+### Modes & Controls
+
+- **Vision Mode** (enabled by default in Settings): Takes a viewport screenshot with Set-of-Marks numbered badges on each step. Enables spatial layout understanding for visual interfaces.
+- **Action Mode**:
+  - `Ask before acting`: Prompts for user confirmation before executing any click, input, or navigation step.
+  - `Act without asking`: Executes autonomously until completion or failure. High-risk operations still force manual confirmation.
+- **Selection Context**: Highlight any text on the page and right-click to select **"Send selection to Gemini Agent"** to attach the text directly into the agent's context.
+
+## Safety & security
+
+- **Prompt injection defense**: Webpage DOM elements and text are strictly treated as untrusted data. The system prompt forbids executing instructions embedded in webpage content.
+- **Automatic PII redaction**: Passwords, authentication tokens, API keys, credit cards, emails, phone numbers, and SSNs are masked with `[REDACTED_PII]` before sending DOM trees to the model.
+- **High-risk action guardrails**: Operations matching destructive or transactional keywords (`pay`, `buy`, `delete`, `remove`, `login`, `signin`, `transfer`, `checkout`) force manual approval, even in autonomous mode.
+- **Navigation sanitization**: Enforces HTTPS for external navigation and blocks navigation to `localhost`, loopbacks (`127.0.0.1`), and RFC1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
+- **Local-only credential transport**: API credentials are stored in Chrome extension local storage and communicated exclusively to your configured local proxy address.
+
+## Development
+
+Run unit tests using Node's built-in test runner (Node >= 20):
+
+```bash
+npm test
+```
+
+## Repository layout
+
+```text
+manifest.json                   Manifest V3 extension configuration
+background.js                   Service worker orchestrating the ReAct agent loop
+content.js                      Injected script for DOM simplification, SoM badges & action dispatch
+sidepanel.html                  Side panel markup and settings view
+sidepanel.js                    Side panel controller, state synchronization & UI events
+sidepanel.css                   Styles for chat thread, badges, settings, and confirmation cards
+lib/api-client.js               Gemini REST client, model list parser & connection error handler
+lib/history.js                  Sliding-window history compression & DOM character truncation
+lib/markdown.js                 Sanitized, escape-first Markdown renderer for assistant answers
+tests/api-client.test.js        Unit tests for API endpoint normalization and error handling
+tests/history.test.js           Unit tests for DOM truncation and history compaction
+tests/markdown.test.js          Unit tests for Markdown parsing and XSS prevention
+docs/superpowers/               Detailed architecture specifications and implementation plans
+package.json                    Test script runner definition
+LICENSE                         MIT License
+```
+
+## Limits
+
+- **Single active tab scope**: Automation operates strictly on the active tab of the current window. Cross-tab workflows are not supported.
+- **Viewport-bounded Set-of-Marks**: Badges are generated only for interactive elements visible within the current viewport; elements requiring scrolling are tagged once scrolled into view.
+- **Proxy uptime dependency**: Running via subscription quota requires CLIProxyAPI to remain active on `http://127.0.0.1:8317`.
+- **Restricted browser pages**: Chrome security policy prevents content script injection into `chrome://`, `chrome-extension://`, and the Chrome Web Store.
+- **Interactive challenges**: CAPTCHAs, Cloudflare turnstiles, and biometric 2FA prompts require manual human completion.
+
+## Contributors
+
+Fei ([@yifeifelix](https://github.com/yifeifelix))
+
+## Licence
+
+[MIT](LICENSE)
