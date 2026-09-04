@@ -20,6 +20,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true; // Keep message channel open for async response
 });
 
+// Page-controlled text is interpolated into the snapshot the agent reads, so
+// it must not be able to break out of its attribute or forge a whole element
+// line: collapse whitespace, neutralize quotes, cap length.
+function field(raw, max = 80) {
+  return String(raw === null || raw === undefined ? '' : raw)
+    .replace(/\s+/g, ' ')
+    .replace(/"/g, "'")
+    .trim()
+    .substring(0, max);
+}
+
 // Checks if an element is visible to the user
 function isElementVisible(el) {
   const rect = el.getBoundingClientRect();
@@ -41,7 +52,7 @@ function simplifyDOM() {
   let serializedElements = [];
   
   // Set window title and URL
-  let output = `PAGE_TITLE: "${document.title}"\nPAGE_URL: "${window.location.href}"\n\nINTERACTIVE_ELEMENTS:\n`;
+  let output = `PAGE_TITLE: "${field(document.title, 200)}"\nPAGE_URL: "${field(window.location.href, 300)}"\n\nINTERACTIVE_ELEMENTS:\n`;
   
   elements.forEach((el) => {
     if (!isElementVisible(el)) return;
@@ -70,33 +81,33 @@ function simplifyDOM() {
       /pass|pwd|key|token|secret|card|cvv|email|phone|auth|api|code|social|ssn|secur/i.test(placeholder);
       
     const value = isSensitive && rawValue ? '[REDACTED_PII]' : rawValue;
-    const textContent = (el.textContent || '').trim().replace(/\s+/g, ' ').substring(0, 80);
+    const textContent = field(el.textContent);
     const role = el.getAttribute('role') || '';
     const title = el.getAttribute('title') || '';
     
     // Build descriptive line
     let desc = `- `;
     if (tagName === 'input') {
-      desc += `Input[type="${type}"] ID="${agentId}" Name="${name}"`;
-      if (placeholder) desc += ` Placeholder="${placeholder}"`;
-      if (value) desc += ` Value="${value}"`;
+      desc += `Input[type="${field(type, 20)}"] ID="${agentId}" Name="${field(name, 40)}"`;
+      if (placeholder) desc += ` Placeholder="${field(placeholder)}"`;
+      if (value) desc += ` Value="${field(value)}"`;
     } else if (tagName === 'textarea') {
-      desc += `Textarea ID="${agentId}" Name="${name}"`;
-      if (placeholder) desc += ` Placeholder="${placeholder}"`;
-      if (value) desc += ` Value="${value}"`;
+      desc += `Textarea ID="${agentId}" Name="${field(name, 40)}"`;
+      if (placeholder) desc += ` Placeholder="${field(placeholder)}"`;
+      if (value) desc += ` Value="${field(value)}"`;
     } else if (tagName === 'select') {
-      desc += `Select ID="${agentId}" Name="${name}" Value="${value}" Options:`;
-      const options = Array.from(el.options).map(opt => `"${opt.value || opt.text}"`).slice(0, 5).join(', ');
+      desc += `Select ID="${agentId}" Name="${field(name, 40)}" Value="${field(value)}" Options:`;
+      const options = Array.from(el.options).map(opt => `"${field(opt.value || opt.text, 40)}"`).slice(0, 5).join(', ');
       desc += ` [${options}]`;
     } else if (tagName === 'a') {
-      desc += `Link ID="${agentId}" Text="${textContent}" href="${el.getAttribute('href') || ''}"`;
+      desc += `Link ID="${agentId}" Text="${textContent}" href="${field(el.getAttribute('href'), 120)}"`;
     } else if (tagName === 'button' || role === 'button') {
       desc += `Button ID="${agentId}" Text="${textContent}"`;
     } else {
       desc += `Element[${tagName}] ID="${agentId}" Text="${textContent}"`;
     }
     
-    if (title) desc += ` Title="${title}"`;
+    if (title) desc += ` Title="${field(title)}"`;
     
     serializedElements.push(desc);
   });

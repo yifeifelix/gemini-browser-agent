@@ -1,9 +1,13 @@
 import { listModels, generateContent, describeApiError, normalizeBaseUrl, DEFAULT_PROXY_URL } from './lib/api-client.js';
 import { truncateDom, buildApiContents } from './lib/history.js';
+import { validateNavigation } from './lib/navigation.js';
+import { findElementDescription, isCriticalAction } from './lib/dom-snapshot.js';
+import { events } from './lib/run-events.js';
+import { appendEvent } from './lib/run-log.js';
 
 // Background state
 let currentState = 'idle';
-let logs = [];
+let runLog = [];
 let userGoal = '';
 let agentLoopActive = false;
 let executionHistory = []; // Conversation history for Gemini API
@@ -33,7 +37,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     const selectedText = info.selectionText;
     if (selectedText) {
       activeSelection = selectedText;
-      addLog(`[System] Received text selection via context menu (${selectedText.length} chars)`, 'system-log');
+      emit(events.note(`Received text selection (${selectedText.length} chars)`));
       
       // Programmatically open sidepanel
       if (tab && tab.id) {
@@ -93,14 +97,12 @@ function updateState(newState) {
   });
 }
 
-// Add a log and broadcast it
-function addLog(text, logType = 'system-log') {
-  const log = { text, type: logType };
-  logs.push(log);
-  // Cap logs at 200 items to avoid memory issues
-  if (logs.length > 200) logs.shift();
-  
-  chrome.runtime.sendMessage({ type: 'LOG_ADDED', text, logType }).catch(() => {
+// Record a run event and broadcast it. The side panel renders off the event's
+// kind, so the wording of any message below is free to change.
+function emit(event) {
+  runLog = appendEvent(runLog, event);
+
+  chrome.runtime.sendMessage({ type: 'RUN_EVENT', event }).catch(() => {
     // Ignore error if sidepanel is closed
   });
 }
@@ -171,7 +173,7 @@ async function captureScreenshot(tabId, windowId) {
     const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 65 });
     return { mimeType: 'image/jpeg', data: dataUrl.split(',')[1] };
   } catch (err) {
-    addLog(`[System Warning] Screenshot failed (${err.message}). Continuing with DOM only.`, 'system-log');
+    emit(events.note(`Screenshot failed (${err.message}). Continuing with DOM only.`, 'warn'));
     return null;
   } finally {
     try {
@@ -199,17 +201,16 @@ function getSettings() {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'GET_STATE') {
     sendResponse({ 
-      state: currentState, 
-      logs: logs, 
-      goal: userGoal, 
+      state: currentState,
+      events: runLog,
       pendingConfirmation: pendingConfirmation,
-      selection: activeSelection 
+      selection: activeSelection
     });
   } else if (request.type === 'CLEAR_SELECTION') {
     activeSelection = '';
     sendResponse({ success: true });
-  } else if (request.type === 'CLEAR_LOGS') {
-    logs = [];
+  } else if (request.type === 'CLEAR_RUN_LOG') {
+    runLog = [];
     sendResponse({ success: true });
   } else if (request.type === 'LIST_MODELS') {
     getSettings()
@@ -228,7 +229,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     activeSelection = request.selection || '';
     agentLoopActive = true;
     executionHistory = [];
-    addLog(`[User Goal] ${userGoal}`, 'user-log'); // persisted so reopening the panel restores the user bubble
+    emit(events.runStarted(userGoal)); // opens the work card and the user bubble on replay
     startAgentLoop();
     sendResponse({ success: true });
   } else if (request.type === 'STOP_AGENT') {
@@ -239,7 +240,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     pendingConfirmation = null;
     updateState('idle');
-    addLog('[System] Stopping agent...', 'system-log');
+    emit(events.note('Stopping agent…'));
     sendResponse({ success: true });
   } else if (request.type === 'CONFIRM_RESPONSE') {
     if (confirmationResolver) {
@@ -254,8 +255,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Main agentic loop
 async function startAgentLoop() {
   updateState('active');
-  addLog('[System] Initializing Gemini Browser Agent loop...', 'system-log');
   
+  let outcome = 'done';
   let currentStep = 1;
   const maxSteps = 15;
   let lastActionResult = null;
@@ -263,11 +264,11 @@ async function startAgentLoop() {
   try {
     const settings = await getSettings();
     if (!settings.apiKey) {
-      addLog('[System Warning] No API key configured. If your CLIProxyAPI requires api-keys, open Settings and set one.', 'system-log');
+      emit(events.note('No API key configured. If your CLIProxyAPI requires api-keys, open Settings and set one.', 'warn'));
     }
 
     while (agentLoopActive && currentStep <= maxSteps) {
-      addLog(`\n--- Step ${currentStep} of ${maxSteps} ---`, 'system-log');
+      emit(events.step(currentStep, maxSteps));
       
       // 1. Get active tab
       const tabs = await new Promise(resolve => chrome.tabs.query({ active: true, lastFocusedWindow: true }, resolve));
@@ -278,7 +279,7 @@ async function startAgentLoop() {
       
       // 2. Fetch DOM content from content script
       updateState('waiting');
-      addLog(`[System] Reading DOM of "${activeTab.title}"...`, 'system-log');
+      emit(events.status('reading_page', activeTab.title));
       
       let domContext = "";
       let domAccessible = true;
@@ -286,7 +287,7 @@ async function startAgentLoop() {
         domContext = await getPageDOM(activeTab.id);
       } catch (err) {
         domAccessible = false;
-        addLog(`[System Warning] Page DOM inaccessible (${err.message}). Switching to Chat/Navigation mode.`, 'system-log');
+        emit(events.note(`Page DOM inaccessible (${err.message}). Switching to Chat/Navigation mode.`, 'warn'));
         domContext = `(Webpage DOM is not accessible on this page. You cannot perform browser actions like click, input, select, or pressEnter on this page. However, you can still navigate to any website by setting action to "navigate" and value to the target URL (e.g. "https://www.youtube.com").)`;
       }
       
@@ -313,7 +314,7 @@ async function startAgentLoop() {
 
       executionHistory.push({ role: 'user', summary, fullText, image: screenshot });
 
-      addLog(`[System] Consulting Gemini...`, 'system-log');
+      emit(events.status('thinking'));
       
       // 4. Call Gemini API via OAuth with 429 auto-retry
       let response;
@@ -359,7 +360,8 @@ async function startAgentLoop() {
           } catch(e) {
             // Ignore parse errors
           }
-          addLog(`[Quota Exceeded] Rate limited (429). Auto-retrying in ${retryDelaySeconds} seconds...`, 'error-log');
+          emit(events.status('rate_limited'));
+          emit(events.note(`Rate limited (429). Auto-retrying in ${retryDelaySeconds} seconds…`, 'error'));
           updateState('waiting');
           await sleep(retryDelaySeconds * 1000);
           updateState('active');
@@ -396,7 +398,7 @@ async function startAgentLoop() {
         const why = candidate.finishReason === 'MAX_TOKENS'
           ? 'output hit the token limit and was cut off mid-JSON'
           : `output was not valid JSON (${parseErr.message})`;
-        addLog(`[System Warning] Model response unusable: ${why}. Asking model to retry...`, 'error-log');
+        emit(events.note(`Model response unusable: ${why}. Asking model to retry…`, 'error'));
         // Keep only a stub in history — appending megabytes of broken output
         // would poison and bloat every subsequent request.
         executionHistory.push({ role: 'model', text: responseText.slice(0, 300) + '…(truncated, invalid)' });
@@ -408,49 +410,52 @@ async function startAgentLoop() {
       // Append model response to API history
       executionHistory.push({ role: 'model', text: responseText });
 
-      addLog(`[AI Thought] ${agentDecision.thought}`, 'thought-log');
+      emit(events.thought(agentDecision.thought));
 
       // 5. Check action
       if (agentDecision.action === 'done') {
-        addLog(`[AI Done] Goal achieved!`, 'success-log');
-        const answer = agentDecision.finalAnswer || "Goal achieved.";
-        addLog(`[AI Final Answer] ${answer}`, 'success-log');
+        emit(events.answer(agentDecision.finalAnswer || 'Goal achieved.'));
+        outcome = 'done';
         break;
       } else if (agentDecision.action === 'fail') {
         const explanation = agentDecision.finalAnswer || "Agent failed without explanation.";
-        addLog(`[AI Fail] Agent declared failure: ${explanation}`, 'error-log');
+        emit(events.note(`Agent declared failure: ${explanation}`, 'error'));
+        outcome = 'failed';
         break;
       }
 
       // Validate and sanitize the action
-      const validation = validateAndSanitizeAction(agentDecision, domContext);
+      const validation = validateNavigation(agentDecision);
       if (!validation.valid) {
-        addLog(`[Safety Violation] Blocked action: ${validation.error}`, 'error-log');
+        emit(events.note(`Blocked by safety filter: ${validation.error}`, 'error'));
         lastActionResult = `Failure. Blocked by safety filter: ${validation.error}`;
         currentStep++;
         continue;
       }
 
+      // The sanitized URL replaces the model's, without mutating its decision.
+      const safeDecision = { ...agentDecision, value: validation.value };
+
       // Check if confirmation is required (override to force confirmation on critical elements/navs)
       let requireConfirmation = (activeMode === 'ask');
       if (!requireConfirmation) {
-        const isCritical = checkIsCriticalAction(agentDecision, domContext);
+        const isCritical = isCriticalAction(domContext, safeDecision);
         if (isCritical) {
           requireConfirmation = true;
-          addLog(`[Safety Warning] Action classified as HIGH-RISK. Forcing manual verification...`, 'error-log');
+          emit(events.note('Action classified as high-risk. Forcing manual verification…', 'error'));
         }
       }
 
       // Request User Confirmation for Action
       if (requireConfirmation) {
         pendingConfirmation = {
-          ...agentDecision,
-          elementDesc: findElementDescription(agentDecision.targetId, domContext)
+          ...safeDecision,
+          elementDesc: findElementDescription(domContext, safeDecision.targetId)
         };
         chrome.runtime.sendMessage({ type: 'CONFIRMATION_REQUIRED', decision: pendingConfirmation }).catch(() => {});
         
         updateState('waiting');
-        addLog(`[System] Waiting for safety confirmation in Sidepanel...`, 'system-log');
+        emit(events.status('awaiting_confirmation'));
         
         const approved = await new Promise((resolve) => {
           confirmationResolver = resolve;
@@ -459,18 +464,19 @@ async function startAgentLoop() {
         updateState('active');
         
         if (!approved || !agentLoopActive) {
-          addLog(`[System] Action rejected or stopped by user. Exiting loop.`, 'error-log');
+          emit(events.note('Action rejected or stopped by user. Exiting loop.', 'error'));
+          outcome = 'stopped';
           break;
         }
       }
 
       // Execute Action
-      addLog(`[AI Action] ${agentDecision.action.toUpperCase()}` + (agentDecision.targetId ? ` target ID="${agentDecision.targetId}"` : '') + (agentDecision.value ? ` with value "${agentDecision.value}"` : ''), 'action-log');
+      emit(events.action(safeDecision));
       
       let executionResult;
-      if (agentDecision.action === 'navigate') {
+      if (safeDecision.action === 'navigate') {
         try {
-          const url = agentDecision.value;
+          const url = safeDecision.value;
           await new Promise((resolve, reject) => {
             chrome.tabs.update(activeTab.id, { url: url }, (tab) => {
               if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
@@ -487,18 +493,18 @@ async function startAgentLoop() {
         // For input actions, first try the page MAIN world where editor
         // globals (window.monaco) live — synthetic events from the isolated
         // world are silently ignored by Monaco-based editors (LeetCode etc.).
-        if (agentDecision.action === 'input') {
+        if (safeDecision.action === 'input') {
           try {
             const [injection] = await chrome.scripting.executeScript({
               target: { tabId: activeTab.id },
               world: 'MAIN',
               func: trySetEditorValueMainWorld,
-              args: [agentDecision.targetId, agentDecision.value]
+              args: [safeDecision.targetId, safeDecision.value]
             });
             if (injection && injection.result && injection.result.handled) {
               executionResult = {
                 success: true,
-                message: `Editor content set via ${injection.result.how} (${agentDecision.value.length} chars, previous content fully replaced).`
+                message: `Editor content set via ${injection.result.how} (${safeDecision.value.length} chars, previous content fully replaced).`
               };
             }
           } catch (e) {
@@ -512,9 +518,9 @@ async function startAgentLoop() {
               activeTab.id,
               {
                 type: 'EXECUTE_ACTION',
-                action: agentDecision.action,
-                targetId: agentDecision.targetId,
-                value: agentDecision.value
+                action: safeDecision.action,
+                targetId: safeDecision.targetId,
+                value: safeDecision.value
               },
               (res) => {
                 if (chrome.runtime.lastError) {
@@ -530,13 +536,13 @@ async function startAgentLoop() {
 
       if (executionResult.success) {
         lastActionResult = `Success. ${executionResult.message || ''}`;
-        addLog(`[System] Action succeeded. Waiting for page changes...`, 'system-log');
+        emit(events.status('settling'));
         
         // Wait for page changes
         await waitForTabLoad(activeTab.id);
       } else {
         lastActionResult = `Failure. ${executionResult.error}`;
-        addLog(`[System Error] Action failed: ${executionResult.error}`, 'error-log');
+        emit(events.note(`Action failed: ${executionResult.error}`, 'error'));
         await sleep(1500); // Sleep briefly before retry
       }
 
@@ -544,56 +550,25 @@ async function startAgentLoop() {
     }
 
     if (currentStep > maxSteps) {
-      addLog(`[System] Reached maximum step limit of ${maxSteps}. Agent stopped.`, 'error-log');
+      emit(events.note(`Reached maximum step limit of ${maxSteps}. Agent stopped.`, 'error'));
+      outcome = 'failed';
     }
 
   } catch (err) {
-    addLog(`[System Error] ${err.message}`, 'error-log');
+    emit(events.note((err && err.message) || String(err), 'error'));
+    emit(events.runFinished('error'));
     updateState('error');
     agentLoopActive = false;
     return;
   }
 
+  // agentLoopActive is only cleared here or by STOP_AGENT, so a run that
+  // ends with it already false was stopped by the user.
+  emit(events.runFinished(agentLoopActive ? outcome : 'stopped'));
   updateState('idle');
   agentLoopActive = false;
 }
 
-// Validates URL navigation inputs and blocks insecure or local targets
-function validateAndSanitizeAction(decision, domContext) {
-  if (decision.action === 'navigate') {
-    let url = (decision.value || '').trim();
-    if (!url) {
-      return { valid: false, error: "Empty URL value provided." };
-    }
-    
-    // Normalize unencrypted HTTP urls to HTTPS
-    if (url.startsWith('http://')) {
-      url = 'https://' + url.substring(7);
-    } else if (!url.startsWith('https://')) {
-      url = 'https://' + url;
-    }
-    
-    try {
-      const parsedUrl = new URL(url);
-      const host = parsedUrl.hostname.toLowerCase();
-      
-      // Block loops back, localhost, and private IPv4 ranges (10.x.x.x, 172.16.x.x, 192.168.x.x)
-      const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-      const isPrivateIP = /^10\./.test(host) || 
-                          /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) || 
-                          /^192\.168\./.test(host);
-                          
-      if (isLocalHost || isPrivateIP) {
-        return { valid: false, error: `Accessing local/private network domains (${host}) is blocked for safety.` };
-      }
-      
-      decision.value = url; // Save sanitized secure URL back to decision
-    } catch (e) {
-      return { valid: false, error: "Malformed URL path." };
-    }
-  }
-  return { valid: true };
-}
 
 // Sets a code editor's value from the page MAIN world via the editor's own
 // API (window.monaco). Runs INSIDE the page via chrome.scripting — must be
@@ -629,33 +604,4 @@ function trySetEditorValueMainWorld(agentId, value) {
   return { handled: false, reason: 'monaco instance not located' };
 }
 
-// Returns the simplified-DOM line describing an element, so confirmation
-// prompts can show what the target actually is (button text etc.).
-function findElementDescription(targetId, domContext) {
-  if (!targetId || !domContext) return null;
-  const match = domContext.match(new RegExp(`^- .*ID="${targetId}"[^\\n]*`, 'm'));
-  return match ? match[0].replace(/^- /, '') : null;
-}
 
-// Determines if an action is critical and requires safety manual override check.
-// Only consulted in "Act without asking" mode — "Ask before acting" already
-// confirms every step. Navigation is NOT treated as critical here: URLs are
-// independently validated (HTTPS enforced, local/private hosts blocked) in
-// validateAndSanitizeAction.
-function checkIsCriticalAction(decision, domContext) {
-  if (!decision.targetId) return false;
-  
-  // Find target element details in simplified DOM output
-  const regex = new RegExp(`ID="${decision.targetId}"[^\\n]*`, 'i');
-  const match = domContext.match(regex);
-  if (match) {
-    const elementStr = match[0];
-    
-    // High-risk keywords matching submission, deletion, payment, checkout, or credentials
-    const dangerousKeywords = /pay|buy|purchase|delete|remove|destroy|terminate|authorize|login|signin|sign-in|sign-up|signup|transfer|confirm|submit|checkout/i;
-    if (dangerousKeywords.test(elementStr)) {
-      return true;
-    }
-  }
-  return false;
-}

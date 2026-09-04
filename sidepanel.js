@@ -1,4 +1,5 @@
 import { renderMarkdown } from './lib/markdown.js';
+import { toThread } from './lib/run-events.js';
 
 // UI Elements
 const chatContainer = document.getElementById('chat-container');
@@ -52,7 +53,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (response) {
       currentAgentState = response.state;
       updateUIState(response.state);
-      restoreLogsAsChat(response.logs);
+      restoreThread(response.events);
       if (response.selection) {
         showSelectionBadge(response.selection);
       }
@@ -216,7 +217,7 @@ clearSelectionBtn.addEventListener('click', (e) => {
 newChatBtn.addEventListener('click', () => {
   chatContainer.innerHTML = '';
   appendChatMessage('assistant', 'Hello! I am your Antigravity Gemini Browser Agent. Ask me a question about this page, or enter a goal for me to automate.');
-  chrome.runtime.sendMessage({ type: 'CLEAR_LOGS' });
+  chrome.runtime.sendMessage({ type: 'CLEAR_RUN_LOG' });
   appendLog('[System] Chat history cleared.', 'system-log');
 });
 
@@ -276,8 +277,8 @@ sendBtn.addEventListener('click', () => {
 
 // Listen to Messages from background.js
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'LOG_ADDED') {
-    handleIncomingLog(message.text, message.logType);
+  if (message.type === 'RUN_EVENT') {
+    renderEvent(message.event);
   } else if (message.type === 'STATE_CHANGED') {
     currentAgentState = message.state;
     updateUIState(message.state);
@@ -292,7 +293,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // ===== Working-process card (Claude in Chrome style) =====
-// All step logs of one agent run collapse into a single expandable card;
+// All events of one agent run collapse into a single expandable card;
 // the chat thread keeps only user messages and final answers as bubbles.
 let activeWorkCard = null; // { card, body, statusText, stepEl, steps }
 
@@ -371,80 +372,130 @@ function finishWorkCard(failed) {
   activeWorkCard = null;
 }
 
-// Parse background logs and render as clean Chat UI elements
-function handleIncomingLog(text, type) {
-  if (type === 'user-log') {
-    // Already appended locally by user click
-    return;
-  }
+// ===== Run event rendering =====
+// The background sends structured run events. Every user-facing sentence
+// about a run is written here, so changing wording cannot break the panel.
 
-  if (type === 'thought-log') {
-    appendWorkLine(text, 'thought');
-    setWorkStatus(text.replace('[AI Thought]', '💭').trim());
-  } else if (type === 'success-log') {
-    if (text.startsWith('[AI Final Answer]')) {
-      const answer = text.replace('[AI Final Answer]', '').trim();
-      finishWorkCard(false);
-      appendChatMessage('assistant', answer);
-    } else if (activeWorkCard) {
-      appendWorkLine(text, 'success');
-    } else {
-      appendSystemLog(text, 'success');
-    }
-  } else if (type === 'error-log') {
-    // Errors outside an agent run (e.g. model list warning at panel open)
-    // stay as plain log lines instead of spawning a work card.
-    if (activeWorkCard) {
-      appendWorkLine(text, 'error');
-      setWorkStatus(text, true);
-    } else {
-      appendSystemLog(text, 'error');
-    }
-  } else if (type === 'action-log') {
-    appendWorkLine(text, 'action');
-    setWorkStatus(text.replace('[AI Action]', '⚡').trim());
+const PHASE_TEXT = {
+  reading_page: 'Reading page…',
+  thinking: 'Thinking…',
+  awaiting_confirmation: 'Waiting for your approval…',
+  rate_limited: 'Rate limited, waiting…',
+  settling: 'Waiting for page changes…'
+};
+
+function describePhase(phase, detail) {
+  const base = PHASE_TEXT[phase] || phase;
+  return detail ? `${base.replace(/…$/, '')} — ${detail}` : base;
+}
+
+function describeAction(event) {
+  let text = String(event.action || '').toUpperCase();
+  if (event.targetId) text += ` target ID="${event.targetId}"`;
+  if (event.value) text += ` with value "${event.value}"`;
+  return text;
+}
+
+function setWorkStep(n, of) {
+  const wc = ensureWorkCard();
+  wc.steps = n;
+  wc.stepEl.textContent = of ? `Step ${n} of ${of}` : `Step ${n}`;
+}
+
+function renderWorkLine(line) {
+  if (line.kind === 'step') {
+    appendWorkLine(`— Step ${line.n} of ${line.of} —`, 'system');
+  } else if (line.kind === 'thought') {
+    appendWorkLine(`💭 ${line.text}`, 'thought');
+  } else if (line.kind === 'action') {
+    appendWorkLine(`⚡ ${describeAction(line)}`, 'action');
   } else {
-    // system-log
-    if (text.includes('Initializing Gemini Browser Agent loop')) {
-      finishWorkCard(true); // close any stale card from a previous run
-      ensureWorkCard();
-      appendWorkLine(text, 'system');
-      return;
-    }
-    const stepMatch = text.match(/--- Step (\d+) of \d+ ---/);
-    if (activeWorkCard) {
-      appendWorkLine(text, 'system');
-      if (stepMatch) {
-        activeWorkCard.steps = parseInt(stepMatch[1], 10);
-        activeWorkCard.stepEl.textContent = `Step ${stepMatch[1]}`;
-      } else if (text.includes('Reading DOM')) {
-        setWorkStatus('Reading page…');
-      } else if (text.includes('Consulting Gemini')) {
-        setWorkStatus('Thinking…');
-      } else if (text.includes('Waiting for safety confirmation')) {
-        setWorkStatus('Waiting for your approval…');
-      }
-    } else {
-      appendSystemLog(text, 'system');
-    }
+    appendWorkLine(line.text, line.level === 'error' ? 'error' : 'system');
   }
 }
 
-function restoreLogsAsChat(logs) {
+// Applies one live event to the thread.
+function renderEvent(event) {
+  if (!event || typeof event.kind !== 'string') return;
+
+  switch (event.kind) {
+    case 'run_started':
+      // The user bubble was already appended locally when they pressed send;
+      // it is rebuilt from the event log only on restore.
+      finishWorkCard(true);
+      ensureWorkCard();
+      break;
+
+    case 'step':
+      setWorkStep(event.n, event.of);
+      renderWorkLine(event);
+      break;
+
+    case 'status':
+      setWorkStatus(describePhase(event.phase, event.detail), event.phase === 'rate_limited');
+      break;
+
+    case 'thought':
+      renderWorkLine(event);
+      setWorkStatus(`💭 ${event.text}`);
+      break;
+
+    case 'action':
+      renderWorkLine(event);
+      setWorkStatus(`⚡ ${describeAction(event)}`);
+      break;
+
+    case 'note':
+      if (activeWorkCard) {
+        renderWorkLine(event);
+        if (event.level === 'error') setWorkStatus(event.text, true);
+      } else {
+        appendSystemLog(event.text, event.level === 'error' ? 'error' : 'system');
+      }
+      break;
+
+    case 'answer':
+      finishWorkCard(false);
+      appendChatMessage('assistant', event.markdown);
+      break;
+
+    case 'run_finished':
+      finishWorkCard(event.outcome === 'error' || event.outcome === 'failed');
+      break;
+
+    default:
+      break;
+  }
+}
+
+// Rebuilds the whole thread from the background's event log, used when the
+// panel is reopened. Works even when the log was trimmed mid-history.
+function restoreThread(eventLog) {
   chatContainer.innerHTML = '';
   activeWorkCard = null;
-  // Initial Greeting
   appendChatMessage('assistant', 'Hello! I am your Antigravity Gemini Browser Agent. Ask me a question about this page, or enter a goal for me to automate.');
 
-  logs.forEach(log => {
-    if (log.type === 'user-log') {
-      finishWorkCard(true); // close card from a previous run before the next user turn
-      const uMsg = log.text.replace('[User Goal]', '').trim();
-      appendChatMessage('user', uMsg);
-    } else {
-      handleIncomingLog(log.text, log.type);
+  for (const item of toThread(eventLog)) {
+    if (item.kind === 'user') {
+      finishWorkCard(true);
+      appendChatMessage('user', item.text);
+    } else if (item.kind === 'answer') {
+      finishWorkCard(false);
+      appendChatMessage('assistant', item.markdown);
+    } else if (item.kind === 'note') {
+      appendSystemLog(item.text, item.level === 'error' ? 'error' : 'system');
+    } else if (item.kind === 'work') {
+      activeWorkCard = null;
+      ensureWorkCard();
+      if (item.step) setWorkStep(item.step, item.of);
+      item.lines.forEach(renderWorkLine);
+      if (item.state === 'running') {
+        if (item.phase) setWorkStatus(describePhase(item.phase, item.phaseDetail));
+      } else {
+        finishWorkCard(item.state === 'failed');
+      }
     }
-  });
+  }
 
   // If the agent is not running anymore, no card should stay "running"
   if (currentAgentState === 'idle' || currentAgentState === 'error') {
@@ -487,8 +538,11 @@ function appendSystemLog(text, category) {
   scrollChatToBottom();
 }
 
+// Panel-local messages, never sent by the background.
 function appendLog(text, type = 'system-log') {
-  handleIncomingLog(text, type);
+  const level = type === 'error-log' ? 'error' : 'system';
+  if (activeWorkCard) appendWorkLine(text, level);
+  else appendSystemLog(text, level);
 }
 
 function scrollChatToBottom() {
