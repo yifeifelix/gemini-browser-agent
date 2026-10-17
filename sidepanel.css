@@ -648,6 +648,33 @@ body {
   color: #e2e8f0;
 }
 .settings-panel.hidden { display: none; }
+.onboarding-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background-color: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  font-size: 0.78rem;
+  color: #e2e8f0;
+}
+.onboarding-card.hidden { display: none; }
+.onboarding-title { font-weight: 600; }
+.onboarding-link { text-align: center; text-decoration: none; }
+.onboarding-steps { margin: 0; padding-left: 18px; color: #94a3b8; }
+.onboarding-row { display: flex; gap: 6px; }
+.onboarding-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  background-color: #1e293b;
+  color: #e2e8f0;
+  outline: none;
+}
+.onboarding-note { font-size: 0.75rem; color: #e2e8f0; }
 .settings-label { display: flex; flex-direction: column; gap: 3px; color: #94a3b8; }
 .settings-label input {
   padding: 5px 8px;

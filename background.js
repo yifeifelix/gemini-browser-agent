@@ -1,4 +1,4 @@
-import { listModels, generateContent, describeApiError, normalizeBaseUrl, DEFAULT_PROXY_URL } from './lib/api-client.js';
+import { listModels, generateContent, describeApiError, classifyRateLimit, buildThinkingConfig, DAILY_QUOTA_MESSAGE, DEFAULT_API_URL, DEFAULT_MODEL } from './lib/api-client.js';
 import { truncateDom, buildApiContents } from './lib/history.js';
 
 // Background state
@@ -9,7 +9,7 @@ let agentLoopActive = false;
 let executionHistory = []; // Conversation history for Gemini API
 let pendingConfirmation = null;
 let confirmationResolver = null;
-let activeModel = 'gemini-2.5-flash';
+let activeModel = DEFAULT_MODEL;
 let activeMode = 'ask';
 let activeSelection = '';
 
@@ -182,12 +182,12 @@ async function captureScreenshot(tabId, windowId) {
   }
 }
 
-// Loads proxy connection settings saved by the sidepanel
+// Loads settings saved by the sidepanel (legacy proxyUrl values are ignored)
 function getSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['proxyUrl', 'apiKey', 'visionMode'], (items) => {
+    chrome.storage.local.get(['apiKey', 'visionMode'], (items) => {
       resolve({
-        proxyUrl: normalizeBaseUrl(items.proxyUrl || DEFAULT_PROXY_URL),
+        baseUrl: DEFAULT_API_URL,
         apiKey: items.apiKey || '',
         visionMode: items.visionMode !== false
       });
@@ -213,9 +213,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
   } else if (request.type === 'LIST_MODELS') {
     getSettings()
-      .then((settings) => listModels(settings.proxyUrl, settings.apiKey))
+      .then((settings) => listModels(settings.baseUrl, settings.apiKey))
       .then((models) => sendResponse({ success: true, models }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
+      .catch((err) => sendResponse({ success: false, error: err.message, keyInvalid: !!err.keyInvalid }));
     return true; // async response
   } else if (request.type === 'START_AGENT') {
     if (currentState === 'active' || currentState === 'waiting') {
@@ -223,7 +223,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
     userGoal = request.goal;
-    activeModel = request.model || 'gemini-2.5-flash';
+    activeModel = request.model || DEFAULT_MODEL;
     activeMode = request.mode || 'ask';
     activeSelection = request.selection || '';
     agentLoopActive = true;
@@ -263,7 +263,7 @@ async function startAgentLoop() {
   try {
     const settings = await getSettings();
     if (!settings.apiKey) {
-      addLog('[System Warning] No API key configured. If your CLIProxyAPI requires api-keys, open Settings and set one.', 'system-log');
+      addLog('[System Warning] No API key configured. Open Settings and paste a Google AI Studio API key.', 'system-log');
     }
 
     while (agentLoopActive && currentStep <= maxSteps) {
@@ -320,12 +320,14 @@ async function startAgentLoop() {
       let retries = 0;
       const maxRetries = 3;
       
+      const thinkingConfig = buildThinkingConfig(activeModel);
       while (retries < maxRetries && agentLoopActive) {
-        response = await generateContent(settings.proxyUrl, settings.apiKey, activeModel, {
+        response = await generateContent(settings.baseUrl, settings.apiKey, activeModel, {
           contents: buildApiContents(executionHistory),
           generationConfig: {
             responseMimeType: "application/json",
             maxOutputTokens: 8192,
+            ...(thinkingConfig && { thinkingConfig }),
             responseSchema: {
               type: "OBJECT",
               properties: {
@@ -347,18 +349,16 @@ async function startAgentLoop() {
         });
         
         if (response.status === 429) {
-          let retryDelaySeconds = 30; // default fallback
+          let rateLimit = classifyRateLimit(null);
           try {
-            const errJson = await response.clone().json();
-            if (errJson.error && errJson.error.details) {
-              const retryInfo = errJson.error.details.find(d => d['@type'] && d['@type'].includes('RetryInfo'));
-              if (retryInfo && retryInfo.retryDelay) {
-                retryDelaySeconds = parseInt(retryInfo.retryDelay) || 30;
-              }
-            }
+            rateLimit = classifyRateLimit(await response.clone().json());
           } catch(e) {
             // Ignore parse errors
           }
+          if (rateLimit.kind === 'daily') {
+            throw new Error(DAILY_QUOTA_MESSAGE); // retrying cannot help until the daily reset
+          }
+          const retryDelaySeconds = rateLimit.retryDelaySeconds;
           addLog(`[Quota Exceeded] Rate limited (429). Auto-retrying in ${retryDelaySeconds} seconds...`, 'error-log');
           updateState('waiting');
           await sleep(retryDelaySeconds * 1000);
@@ -370,9 +370,14 @@ async function startAgentLoop() {
         break; // Exit retry loop if not a 429
       }
 
+      if (response.status === 429 && agentLoopActive) {
+        throw new Error(`Still rate limited after ${maxRetries} retries. Wait a few minutes and try again.`);
+      }
       if (!response.ok) {
-        const friendly = describeApiError(response.status, settings.proxyUrl);
         const errorText = await response.text();
+        let errJson = null;
+        try { errJson = JSON.parse(errorText); } catch (e) { /* non-JSON body */ }
+        const friendly = describeApiError(response.status, errJson);
         throw new Error(friendly || `Gemini API Error (${response.status}): ${errorText}`);
       }
 

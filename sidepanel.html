@@ -13,8 +13,7 @@
       <div class="header-left">
         <div class="custom-select-wrapper">
           <select id="model-select" class="model-select">
-            <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (offline default)</option>
-            <option value="gemini-2.5-pro">Gemini 2.5 Pro (offline default)</option>
+            <option value="gemini-3.8-flash" selected>Gemini 3.8 Flash (offline default)</option>
           </select>
         </div>
       </div>
@@ -37,13 +36,27 @@
       </div>
     </header>
 
+    <!-- First-run onboarding (shown until an API key is configured) -->
+    <div id="onboarding-card" class="onboarding-card hidden">
+      <div id="onboarding-title" class="onboarding-title">Connect your Google AI Studio key</div>
+      <div class="onboarding-note">Billing and quota depend on the Google project this key belongs to; a project without billing enabled only uses the free tier. Each task sends your task description, any selected text, the current page's DOM content and (with Vision mode on) a page screenshot to the Google Gemini API. On the free tier, Google may use this data to improve its products.</div>
+      <a id="onboarding-get-key" class="test-connection-btn onboarding-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Open Google AI Studio</a>
+      <ol class="onboarding-steps">
+        <li>Sign in and click <b>Create API key</b>.</li>
+        <li>Copy the key.</li>
+        <li>Paste it below and click <b>Connect</b>.</li>
+      </ol>
+      <div class="onboarding-row">
+        <input id="onboarding-key-input" type="password" placeholder="Paste API key">
+        <button id="onboarding-connect-btn" class="test-connection-btn">Connect</button>
+      </div>
+      <span id="onboarding-status" class="connection-status"></span>
+    </div>
+
     <!-- Settings Panel (collapsible) -->
     <div id="settings-panel" class="settings-panel hidden">
-      <label class="settings-label">Proxy URL
-        <input id="proxy-url-input" type="text" placeholder="http://127.0.0.1:8317">
-      </label>
       <label class="settings-label">API Key
-        <input id="api-key-input" type="password" placeholder="CLIProxyAPI api-key">
+        <input id="api-key-input" type="password" placeholder="Google AI Studio API key">
       </label>
       <label class="settings-toggle">
         <input id="vision-toggle" type="checkbox" checked>

@@ -1,10 +1,10 @@
 # Gemini Browser Agent
 
-A Manifest V3 Chrome extension that turns Google Gemini into an agentic browser assistant — built to match the Claude in Chrome experience while running directly on your **Google subscription quota (Google AI Pro, etc.)** without per-token API billing. It bridges subscription accounts via a local [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) proxy, provides Set-of-Marks visual grounding, and executes autonomous multi-step DOM automation with strict safety guardrails.
+A Manifest V3 Chrome extension that turns Google Gemini into an agentic browser assistant — built to match the Claude in Chrome experience, using **your own Google AI Studio API key** (bring-your-own-key) with no proxy to run. It provides Set-of-Marks visual grounding and executes autonomous multi-step DOM automation with strict safety guardrails.
 
 It supports:
 
-- Running directly on Google One / Google AI Pro subscription quotas via local CLIProxyAPI, or switching to Google AI Studio API keys on the fly
+- Bring-your-own-key: connects straight to the official Gemini API with your Google AI Studio key (default model `gemini-3.8-flash` with thinking level `low`)
 - Set-of-Marks (SoM) visual grounding: draws numbered badges on interactive DOM elements and captures JPEG viewport screenshots so Gemini can visually inspect layout and spatial context
 - Sliding-window context compression: caps DOM snapshots at an 8,000-character budget and collapses prior turns to one-line summaries to eliminate token budget explosion
 - High-fidelity editor input: writes code directly into Monaco (e.g. LeetCode) and CodeMirror instances via page MAIN-world API injection and synthetic clipboard paste events, preserving indentation and bypassing event isolation
@@ -16,7 +16,7 @@ It supports:
 
 | Advantage | Practical value |
 |---|---|
-| Subscription-first quota routing | Calls standard Gemini API endpoints via a local CLIProxyAPI instance, consuming existing Google AI Pro subscription quotas instead of metered AI Studio API billing or fragile free-tier limits. |
+| Bring-your-own-key | Calls the official Gemini API with your own AI Studio key. No proxy needed; free-tier daily quota exhaustion is detected and stops the task with a clear message instead of retrying. |
 | Set-of-Marks visual + structural hybrid execution | Viewport screenshots with numbered badges give Gemini spatial awareness, while actions execute strictly against verified element IDs from the simplified DOM tree — eliminating fragile coordinate-based clicking. |
 | Sliding-window context compression | Only the active step sends the full DOM snapshot and screenshot. Prior user turns collapse into single-line summaries, preventing context window bloat and runaway token consumption over 10+ step runs. |
 | Editor-aware input engine | Bypasses browser isolated-world restrictions to invoke `window.monaco.editor` directly from the page MAIN world and fires synthetic paste events to prevent auto-indent mangling. |
@@ -49,33 +49,24 @@ Service Worker (background.js) ──► ReAct Loop (max 15 steps)
      │            │    └─ Native / MAIN-world action dispatch
      │            │
      ▼            └─► HTTP POST /v1beta/models/{model}:generateContent
-Local Proxy (CLIProxyAPI on 127.0.0.1:8317)  ◄── OR ──► Google AI Studio API
-     │ (Gemini CLI OAuth Session)
-     ▼
-Google Subscription Quota (Google AI Pro, etc.)
+Gemini API (generativelanguage.googleapis.com, your AI Studio key)
 ```
 
 1. **Side Panel**: Collects user goals, handles settings, surfaces active DOM selection, and manages step-by-step human confirmation.
 2. **Background Orchestrator**: Runs the ReAct agent loop (up to 15 steps per task), manages model conversation history, enforces safety filters, handles 429 backoff retries, and coordinates actions.
 3. **Content Script**: Scans visible interactive elements, redacts sensitive PII, projects Set-of-Marks numbered badges for screenshots, and executes simulated DOM actions.
-4. **Local Proxy**: Translates standard Gemini API calls into authenticated requests using your Google subscription OAuth session.
+4. **Gemini API**: The official Google endpoint, authenticated with the API key you paste into the side panel.
 
 ## Install
 
-### Step 1: Set up CLIProxyAPI (Once per machine)
+### Step 1: Get a Google AI Studio API key
 
-1. Download the latest binary from [CLIProxyAPI Releases](https://github.com/router-for-me/CLIProxyAPI/releases/latest) (on Windows, choose `CLIProxyAPI_x.y.z_windows_amd64.zip`, or GUI tools like [ProxyPilot](https://github.com/Finesssee/ProxyPilot) / [EasyCLI](https://github.com/router-for-me/EasyCLI)).
-2. Edit `config.yaml`: Add a custom key under `api-keys:` (e.g. `my-local-secret-key`), keeping the default port `8317`.
-3. Start the proxy and complete the Google login prompt (`--login` flag or GUI button) using your Google subscription account.
-4. Keep the proxy running in the background.
+1. Open [Google AI Studio](https://aistudio.google.com/apikey) and sign in.
+2. Click **Create API key** and copy it.
 
-#### Alternative: Direct Google AI Studio API Key
+Quota and billing depend on the settings of the Google project the key belongs to; a project without billing enabled only uses the free tier.
 
-If you prefer not to run a local proxy, you can connect directly to Google's official endpoints (note: this uses API tier quotas, not subscription quotas):
-
-1. Obtain an API Key from [Google AI Studio](https://aistudio.google.com/apikey).
-2. In the extension settings: set **Proxy URL** to `https://generativelanguage.googleapis.com` and paste your **API Key**.
-3. Click **Test Connection** to fetch models directly.
+**Data sent to Google:** each task sends your task description, any selected text, the current page's DOM content and, when Vision mode is on, a screenshot of the page to the Google Gemini API. On the free tier, Google may use this data to improve its products.
 
 ### Step 2: Install the Chrome Extension
 
@@ -87,9 +78,8 @@ If you prefer not to run a local proxy, you can connect directly to Google's off
 ### Step 3: Connect & Test
 
 1. Click the extension icon in your toolbar to open the side panel.
-2. Click the ⚙️ **Settings** button in the top-right corner of the panel.
-3. Confirm **Proxy URL** is set to `http://127.0.0.1:8317` and enter the key configured in `config.yaml`.
-4. Click **Test Connection** — a green `Connected` badge confirms connectivity, and the model dropdown will populate with available models.
+2. On first run a setup card appears: click **Open Google AI Studio** if you still need a key, paste it, and click **Connect**. The key is checked immediately by fetching the model list.
+3. The model dropdown fills from the API and defaults to `gemini-3.8-flash`. You can change the key later under ⚙️ **Settings** and re-check it with **Test Connection**.
 
 ## Use
 
@@ -111,7 +101,7 @@ If you prefer not to run a local proxy, you can connect directly to Google's off
 - **Automatic PII redaction**: Passwords, authentication tokens, API keys, credit cards, emails, phone numbers, and SSNs are masked with `[REDACTED_PII]` before sending DOM trees to the model.
 - **High-risk action guardrails**: Operations matching destructive or transactional keywords (`pay`, `buy`, `delete`, `remove`, `login`, `signin`, `transfer`, `checkout`) force manual approval, even in autonomous mode.
 - **Navigation sanitization**: Enforces HTTPS for external navigation and blocks navigation to `localhost`, loopbacks (`127.0.0.1`), and RFC1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
-- **Local-only credential transport**: API credentials are stored in Chrome extension local storage and communicated exclusively to your configured local proxy address.
+- **Credential handling**: API credentials are stored in Chrome extension local storage and sent only to Google's Gemini API (`generativelanguage.googleapis.com`).
 
 ## Development
 
@@ -145,7 +135,7 @@ LICENSE                         MIT License
 
 - **Single active tab scope**: Automation operates strictly on the active tab of the current window. Cross-tab workflows are not supported.
 - **Viewport-bounded Set-of-Marks**: Badges are generated only for interactive elements visible within the current viewport; elements requiring scrolling are tagged once scrolled into view.
-- **Proxy uptime dependency**: Running via subscription quota requires CLIProxyAPI to remain active on `http://127.0.0.1:8317`.
+- **Free-tier quota**: Requests are limited per minute and per day. Per-minute limits are retried automatically; when the daily quota is used up the task stops, and it resets at midnight Pacific Time.
 - **Restricted browser pages**: Chrome security policy prevents content script injection into `chrome://`, `chrome-extension://`, and the Chrome Web Store.
 - **Interactive challenges**: CAPTCHAs, Cloudflare turnstiles, and biometric 2FA prompts require manual human completion.
 
