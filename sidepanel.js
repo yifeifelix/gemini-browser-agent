@@ -12,11 +12,16 @@ const newChatBtn = document.getElementById('new-chat-btn');
 // Settings Elements
 const settingsBtn = document.getElementById('settings-btn');
 const settingsPanel = document.getElementById('settings-panel');
-const proxyUrlInput = document.getElementById('proxy-url-input');
 const apiKeyInput = document.getElementById('api-key-input');
 const visionToggle = document.getElementById('vision-toggle');
 const testConnectionBtn = document.getElementById('test-connection-btn');
 const connectionStatus = document.getElementById('connection-status');
+
+// Onboarding Elements
+const onboardingCard = document.getElementById('onboarding-card');
+const onboardingKeyInput = document.getElementById('onboarding-key-input');
+const onboardingConnectBtn = document.getElementById('onboarding-connect-btn');
+const onboardingStatus = document.getElementById('onboarding-status');
 
 // Selection Elements
 const selectionBadge = document.getElementById('selection-badge');
@@ -37,12 +42,12 @@ let currentAgentState = 'idle';
 // Initialize Panel
 document.addEventListener('DOMContentLoaded', async () => {
   // Load saved configurations from storage
-  chrome.storage.local.get(['selectedModel', 'actionMode', 'proxyUrl', 'apiKey', 'visionMode'], (items) => {
+  chrome.storage.local.get(['selectedModel', 'actionMode', 'apiKey', 'visionMode'], (items) => {
     if (items.actionMode) {
       updateActionMode(items.actionMode);
     }
-    if (items.proxyUrl) proxyUrlInput.value = items.proxyUrl;
     if (items.apiKey) apiKeyInput.value = items.apiKey;
+    onboardingCard.classList.toggle('hidden', !!items.apiKey);
     visionToggle.checked = items.visionMode !== false; // default on
     refreshModelList(false);
   });
@@ -73,19 +78,17 @@ settingsBtn.addEventListener('click', () => {
 
 function saveSettings() {
   chrome.storage.local.set({
-    proxyUrl: proxyUrlInput.value.trim(),
     apiKey: apiKeyInput.value.trim(),
     visionMode: visionToggle.checked
   });
 }
-proxyUrlInput.addEventListener('change', saveSettings);
 apiKeyInput.addEventListener('change', saveSettings);
 visionToggle.addEventListener('change', saveSettings);
 
-// Fallback used when the proxy is unreachable at panel-open time
+// Fallback used when the model list cannot be fetched at panel-open time
+const DEFAULT_MODEL_ID = 'gemini-3.8-flash';
 const DEFAULT_MODELS = [
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (offline default)' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (offline default)' }
+  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (offline default)' }
 ];
 
 function setConnectionStatus(text, ok) {
@@ -104,6 +107,8 @@ function populateModelSelect(models, savedModel) {
   if (savedModel && models.some((m) => m.id === savedModel)) {
     modelSelect.value = savedModel;
   } else {
+    // No (valid) saved choice: prefer the default model when it is offered
+    if (models.some((m) => m.id === DEFAULT_MODEL_ID)) modelSelect.value = DEFAULT_MODEL_ID;
     chrome.storage.local.set({ selectedModel: modelSelect.value });
   }
 }
@@ -116,13 +121,44 @@ function refreshModelList(showStatus) {
         if (showStatus) setConnectionStatus(`Connected — ${response.models.length} models available`, true);
       } else {
         populateModelSelect(DEFAULT_MODELS, items.selectedModel);
-        const error = (response && response.error) || 'Empty model list from proxy.';
+        const error = (response && response.error) || 'Empty model list from the Gemini API.';
         appendLog(`[System Warning] Could not load model list (${error}). Using offline defaults.`, 'error-log');
         if (showStatus) setConnectionStatus(error, false);
       }
     });
   });
 }
+
+// Onboarding: store the pasted key, then validate it by listing models
+onboardingConnectBtn.addEventListener('click', () => {
+  const key = onboardingKeyInput.value.trim();
+  const setOnboardingStatus = (text, ok) => {
+    onboardingStatus.textContent = text;
+    onboardingStatus.className = `connection-status ${ok ? 'ok' : 'fail'}`;
+  };
+  if (!key) {
+    setOnboardingStatus('Paste your API key first.', false);
+    return;
+  }
+  setOnboardingStatus('Checking key…', true);
+  chrome.storage.local.set({ apiKey: key }, () => {
+    apiKeyInput.value = key;
+    chrome.runtime.sendMessage({ type: 'LIST_MODELS' }, (response) => {
+      if (response && response.success && response.models.length > 0) {
+        setOnboardingStatus(`Connected — ${response.models.length} models available`, true);
+        onboardingCard.classList.add('hidden');
+        chrome.storage.local.get(['selectedModel'], (items) => {
+          populateModelSelect(response.models, items.selectedModel);
+        });
+      } else {
+        // Keep the card visible so the user can correct the key
+        chrome.storage.local.remove('apiKey');
+        apiKeyInput.value = '';
+        setOnboardingStatus((response && response.error) || 'Could not validate the key. Check your network.', false);
+      }
+    });
+  });
+});
 
 testConnectionBtn.addEventListener('click', () => {
   saveSettings();

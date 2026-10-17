@@ -1,8 +1,8 @@
 ﻿{
   "manifest_version": 3,
   "name": "Gemini Browser Agent",
-  "version": "2.1.5",
-  "description": "An agentic browser assistant powered by your Google subscription via a local CLIProxyAPI proxy.",
+  "version": "2.2.0",
+  "description": "An agentic browser assistant powered by Gemini, using your own Google AI Studio API key (free tier).",
   "permissions": [
     "activeTab",
     "scripting",
