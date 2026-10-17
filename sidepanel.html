@@ -39,6 +39,7 @@
     <!-- First-run onboarding (shown until an API key is configured) -->
     <div id="onboarding-card" class="onboarding-card hidden">
       <div id="onboarding-title" class="onboarding-title">Connect your Google AI Studio key</div>
+      <div class="onboarding-note">Billing and quota depend on the Google project this key belongs to; a project without billing enabled only uses the free tier. Each task sends your task description, any selected text, the current page's DOM content and (with Vision mode on) a page screenshot to the Google Gemini API. On the free tier, Google may use this data to improve its products.</div>
       <a id="onboarding-get-key" class="test-connection-btn onboarding-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Open Google AI Studio</a>
       <ol class="onboarding-steps">
         <li>Sign in and click <b>Create API key</b>.</li>
@@ -50,7 +51,6 @@
         <button id="onboarding-connect-btn" class="test-connection-btn">Connect</button>
       </div>
       <span id="onboarding-status" class="connection-status"></span>
-      <div class="onboarding-note">Billing and quota depend on the Google project this key belongs to; a project without billing enabled only uses the free tier. Each task sends your task description, any selected text, the current page's DOM content and (with Vision mode on) a page screenshot to the Google Gemini API. On the free tier, Google may use this data to improve its products.</div>
     </div>
 
     <!-- Settings Panel (collapsible) -->

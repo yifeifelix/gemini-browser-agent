@@ -674,7 +674,7 @@ body {
   color: #e2e8f0;
   outline: none;
 }
-.onboarding-note { font-size: 0.7rem; color: #94a3b8; }
+.onboarding-note { font-size: 0.75rem; color: #e2e8f0; }
 .settings-label { display: flex; flex-direction: column; gap: 3px; color: #94a3b8; }
 .settings-label input {
   padding: 5px 8px;
