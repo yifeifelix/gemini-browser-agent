@@ -5,6 +5,8 @@ import {
   parseModelList,
   describeApiError,
   classifyRateLimit,
+  isKeyError,
+  listModels,
   buildThinkingConfig,
   DEFAULT_API_URL,
   DEFAULT_MODEL
@@ -47,11 +49,10 @@ test('default base URL is the official Gemini API', () => {
 
 test('describeApiError gives key-oriented messages without proxy wording', () => {
   assert.match(describeApiError('network'), /Gemini API/);
-  assert.match(describeApiError(400), /API Key/); // Google returns 400 for invalid API keys
   assert.match(describeApiError(401), /API Key/);
   assert.match(describeApiError(403), /API Key/);
   assert.equal(describeApiError(500), null);
-  for (const s of ['network', 400, 401, 403]) {
+  for (const s of ['network', 401, 403]) {
     assert.doesNotMatch(describeApiError(s), /proxy|cliproxy/i);
   }
 });
@@ -92,9 +93,70 @@ test('classifyRateLimit falls back to minute/30s on missing or malformed bodies'
   assert.deepEqual(classifyRateLimit({ error: {} }), { kind: 'minute', retryDelaySeconds: 30 });
 });
 
-test('buildThinkingConfig sends level only for Gemini 3+ models', () => {
-  assert.deepEqual(buildThinkingConfig('gemini-3.8-flash'), { thinkingLevel: 'low' });
-  assert.deepEqual(buildThinkingConfig('gemini-3.1-pro'), { thinkingLevel: 'low' });
+test('buildThinkingConfig uses an allowlist and the LOW enum', () => {
+  assert.deepEqual(buildThinkingConfig('gemini-3.8-flash'), { thinkingLevel: 'LOW' });
+  assert.equal(buildThinkingConfig('gemini-3.1-flash-lite-image'), null);
+  assert.equal(buildThinkingConfig('gemini-3.8-flash-tts'), null);
+  assert.equal(buildThinkingConfig('gemini-3.8-flash-live'), null);
   assert.equal(buildThinkingConfig('gemini-2.5-flash'), null);
   assert.equal(buildThinkingConfig(undefined), null);
+});
+
+test('400 is a key problem only when the body says API_KEY_INVALID', () => {
+  const badKey = { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'API_KEY_INVALID' }] } };
+  const other = { error: { code: 400, message: 'Thinking level is not supported for this model.' } };
+  assert.equal(isKeyError(400, badKey), true);
+  assert.equal(isKeyError(400, other), false);
+  assert.equal(isKeyError(400, null), false);
+  assert.equal(isKeyError(401, null), true);
+  assert.equal(isKeyError(403, null), true);
+  assert.match(describeApiError(400, badKey), /API Key/);
+  const msg = describeApiError(400, other);
+  assert.match(msg, /Thinking level is not supported for this model\./);
+  assert.doesNotMatch(msg, /API Key/);
+});
+
+test('classifyRateLimit handles fractional delays and message-only daily hints', () => {
+  const frac = { error: { details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '7.5s' }] } };
+  assert.equal(classifyRateLimit(frac).retryDelaySeconds, 8);
+  const msgOnly = { error: { message: 'Quota exceeded: requests per day limit reached' } };
+  assert.equal(classifyRateLimit(msgOnly).kind, 'daily');
+});
+
+function stubFetch(responses) {
+  const calls = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    const r = responses.shift();
+    return { ok: r.status === undefined, status: r.status || 200, json: async () => r.body };
+  };
+  return { calls, restore: () => { globalThis.fetch = orig; } };
+}
+
+test('listModels requests pageSize=1000 with the key header and follows pages', async () => {
+  const stub = stubFetch([
+    { body: { models: [{ name: 'models/a' }], nextPageToken: 'tok 2' } },
+    { body: { models: [{ name: 'models/gemini-3.8-flash' }] } }
+  ]);
+  try {
+    const models = await listModels(DEFAULT_API_URL, 'KEY');
+    assert.deepEqual(models.map((m) => m.id), ['a', 'gemini-3.8-flash']);
+    assert.equal(stub.calls[0].url, `${DEFAULT_API_URL}/v1beta/models?pageSize=1000`);
+    assert.equal(stub.calls[1].url, `${DEFAULT_API_URL}/v1beta/models?pageSize=1000&pageToken=tok%202`);
+    assert.equal(stub.calls[0].init.headers['X-Goog-Api-Key'], 'KEY');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('listModels flags rejected keys but not other failures', async () => {
+  let stub = stubFetch([{ status: 400, body: { error: { details: [{ reason: 'API_KEY_INVALID' }] } } }]);
+  try {
+    await assert.rejects(listModels(DEFAULT_API_URL, 'bad'), (e) => e.keyInvalid === true && /API Key/.test(e.message));
+  } finally { stub.restore(); }
+  stub = stubFetch([{ status: 400, body: { error: { message: 'Something else' } } }]);
+  try {
+    await assert.rejects(listModels(DEFAULT_API_URL, 'k'), (e) => e.keyInvalid === false && /Something else/.test(e.message));
+  } finally { stub.restore(); }
 });

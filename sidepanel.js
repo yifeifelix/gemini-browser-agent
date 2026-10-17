@@ -96,7 +96,7 @@ function setConnectionStatus(text, ok) {
   connectionStatus.className = `connection-status ${ok ? 'ok' : 'fail'}`;
 }
 
-function populateModelSelect(models, savedModel) {
+function populateModelSelect(models, savedModel, persist = true) {
   modelSelect.innerHTML = '';
   models.forEach((m) => {
     const opt = document.createElement('option');
@@ -106,6 +106,15 @@ function populateModelSelect(models, savedModel) {
   });
   if (savedModel && models.some((m) => m.id === savedModel)) {
     modelSelect.value = savedModel;
+  } else if (!persist) {
+    // Offline fallback: keep showing the user's saved choice and never overwrite it
+    if (savedModel) {
+      const opt = document.createElement('option');
+      opt.value = savedModel;
+      opt.textContent = savedModel;
+      modelSelect.appendChild(opt);
+      modelSelect.value = savedModel;
+    }
   } else {
     // No (valid) saved choice: prefer the default model when it is offered
     if (models.some((m) => m.id === DEFAULT_MODEL_ID)) modelSelect.value = DEFAULT_MODEL_ID;
@@ -120,13 +129,21 @@ function refreshModelList(showStatus) {
         populateModelSelect(response.models, items.selectedModel);
         if (showStatus) setConnectionStatus(`Connected — ${response.models.length} models available`, true);
       } else {
-        populateModelSelect(DEFAULT_MODELS, items.selectedModel);
+        populateModelSelect(DEFAULT_MODELS, items.selectedModel, false);
+        if (response && response.keyInvalid) showReconnectCard();
         const error = (response && response.error) || 'Empty model list from the Gemini API.';
         appendLog(`[System Warning] Could not load model list (${error}). Using offline defaults.`, 'error-log');
         if (showStatus) setConnectionStatus(error, false);
       }
     });
   });
+}
+
+// Stored key was rejected (e.g. after an upgrade or revocation): ask for it again
+function showReconnectCard() {
+  document.getElementById('onboarding-title').textContent = 'Reconnect your Google AI Studio key';
+  onboardingConnectBtn.textContent = 'Reconnect';
+  onboardingCard.classList.remove('hidden');
 }
 
 // Onboarding: store the pasted key, then validate it by listing models
@@ -150,10 +167,15 @@ onboardingConnectBtn.addEventListener('click', () => {
         chrome.storage.local.get(['selectedModel'], (items) => {
           populateModelSelect(response.models, items.selectedModel);
         });
+      } else if (response && response.success) {
+        // Key accepted but nothing to list: not a key problem, keep the key
+        setOnboardingStatus('Key accepted, but the API returned no models.', false);
       } else {
-        // Keep the card visible so the user can correct the key
-        chrome.storage.local.remove('apiKey');
-        apiKeyInput.value = '';
+        // Keep the card visible; only discard the key when Google rejected it
+        if (response && response.keyInvalid) {
+          chrome.storage.local.remove('apiKey');
+          apiKeyInput.value = '';
+        }
         setOnboardingStatus((response && response.error) || 'Could not validate the key. Check your network.', false);
       }
     });

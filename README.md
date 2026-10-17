@@ -1,10 +1,10 @@
 # Gemini Browser Agent
 
-A Manifest V3 Chrome extension that turns Google Gemini into an agentic browser assistant — built to match the Claude in Chrome experience, using **your own Google AI Studio API key** (bring-your-own-key) on Google's free quota, with no proxy to run. It provides Set-of-Marks visual grounding and executes autonomous multi-step DOM automation with strict safety guardrails.
+A Manifest V3 Chrome extension that turns Google Gemini into an agentic browser assistant — built to match the Claude in Chrome experience, using **your own Google AI Studio API key** (bring-your-own-key) with no proxy to run. It provides Set-of-Marks visual grounding and executes autonomous multi-step DOM automation with strict safety guardrails.
 
 It supports:
 
-- Bring-your-own-key: connects straight to the official Gemini API with your Google AI Studio key (free tier, default model `gemini-3.8-flash` with thinking level `low`)
+- Bring-your-own-key: connects straight to the official Gemini API with your Google AI Studio key (default model `gemini-3.8-flash` with thinking level `low`)
 - Set-of-Marks (SoM) visual grounding: draws numbered badges on interactive DOM elements and captures JPEG viewport screenshots so Gemini can visually inspect layout and spatial context
 - Sliding-window context compression: caps DOM snapshots at an 8,000-character budget and collapses prior turns to one-line summaries to eliminate token budget explosion
 - High-fidelity editor input: writes code directly into Monaco (e.g. LeetCode) and CodeMirror instances via page MAIN-world API injection and synthetic clipboard paste events, preserving indentation and bypassing event isolation
@@ -16,7 +16,7 @@ It supports:
 
 | Advantage | Practical value |
 |---|---|
-| Bring-your-own-key, free tier | Calls the official Gemini API with your own AI Studio key. No proxy, no paid plan needed; daily quota exhaustion is detected and stops the task with a clear message instead of retrying. |
+| Bring-your-own-key | Calls the official Gemini API with your own AI Studio key. No proxy needed; free-tier daily quota exhaustion is detected and stops the task with a clear message instead of retrying. |
 | Set-of-Marks visual + structural hybrid execution | Viewport screenshots with numbered badges give Gemini spatial awareness, while actions execute strictly against verified element IDs from the simplified DOM tree — eliminating fragile coordinate-based clicking. |
 | Sliding-window context compression | Only the active step sends the full DOM snapshot and screenshot. Prior user turns collapse into single-line summaries, preventing context window bloat and runaway token consumption over 10+ step runs. |
 | Editor-aware input engine | Bypasses browser isolated-world restrictions to invoke `window.monaco.editor` directly from the page MAIN world and fires synthetic paste events to prevent auto-indent mangling. |
@@ -59,12 +59,14 @@ Gemini API (generativelanguage.googleapis.com, your AI Studio key)
 
 ## Install
 
-### Step 1: Get a Google AI Studio API key (free)
+### Step 1: Get a Google AI Studio API key
 
 1. Open [Google AI Studio](https://aistudio.google.com/apikey) and sign in.
 2. Click **Create API key** and copy it.
 
-Only the free quota is used. On the free tier, Google may use your prompts and responses to improve its products.
+Quota and billing depend on the settings of the Google project the key belongs to; a project without billing enabled only uses the free tier.
+
+**Data sent to Google:** each task sends your task description, any selected text, the current page's DOM content and, when Vision mode is on, a screenshot of the page to the Google Gemini API. On the free tier, Google may use this data to improve its products.
 
 ### Step 2: Install the Chrome Extension
 
@@ -99,7 +101,7 @@ Only the free quota is used. On the free tier, Google may use your prompts and r
 - **Automatic PII redaction**: Passwords, authentication tokens, API keys, credit cards, emails, phone numbers, and SSNs are masked with `[REDACTED_PII]` before sending DOM trees to the model.
 - **High-risk action guardrails**: Operations matching destructive or transactional keywords (`pay`, `buy`, `delete`, `remove`, `login`, `signin`, `transfer`, `checkout`) force manual approval, even in autonomous mode.
 - **Navigation sanitization**: Enforces HTTPS for external navigation and blocks navigation to `localhost`, loopbacks (`127.0.0.1`), and RFC1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
-- **Local-only credential transport**: API credentials are stored in Chrome extension local storage and sent only to Google's Gemini API (`generativelanguage.googleapis.com`).
+- **Credential handling**: API credentials are stored in Chrome extension local storage and sent only to Google's Gemini API (`generativelanguage.googleapis.com`).
 
 ## Development
 

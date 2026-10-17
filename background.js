@@ -215,7 +215,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     getSettings()
       .then((settings) => listModels(settings.baseUrl, settings.apiKey))
       .then((models) => sendResponse({ success: true, models }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
+      .catch((err) => sendResponse({ success: false, error: err.message, keyInvalid: !!err.keyInvalid }));
     return true; // async response
   } else if (request.type === 'START_AGENT') {
     if (currentState === 'active' || currentState === 'waiting') {
@@ -320,13 +320,14 @@ async function startAgentLoop() {
       let retries = 0;
       const maxRetries = 3;
       
+      const thinkingConfig = buildThinkingConfig(activeModel);
       while (retries < maxRetries && agentLoopActive) {
         response = await generateContent(settings.baseUrl, settings.apiKey, activeModel, {
           contents: buildApiContents(executionHistory),
           generationConfig: {
             responseMimeType: "application/json",
             maxOutputTokens: 8192,
-            ...(buildThinkingConfig(activeModel) && { thinkingConfig: buildThinkingConfig(activeModel) }),
+            ...(thinkingConfig && { thinkingConfig }),
             responseSchema: {
               type: "OBJECT",
               properties: {
@@ -369,9 +370,14 @@ async function startAgentLoop() {
         break; // Exit retry loop if not a 429
       }
 
+      if (response.status === 429 && agentLoopActive) {
+        throw new Error(`Still rate limited after ${maxRetries} retries. Wait a few minutes and try again.`);
+      }
       if (!response.ok) {
-        const friendly = describeApiError(response.status);
         const errorText = await response.text();
+        let errJson = null;
+        try { errJson = JSON.parse(errorText); } catch (e) { /* non-JSON body */ }
+        const friendly = describeApiError(response.status, errJson);
         throw new Error(friendly || `Gemini API Error (${response.status}): ${errorText}`);
       }
 
